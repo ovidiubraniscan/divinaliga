@@ -4,13 +4,16 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import NavBar from '@/components/NavBar'
 
-type User = {
+type Player = {
   id: string
+  user_id: string
+  status: string
+  username: string
+  display_name: string | null
 }
 
 export default function InterestedPage() {
-  const [user, setUser] = useState<User | null>(null)
-  const [status, setStatus] = useState('')
+  const [players, setPlayers] = useState<Player[]>([])
   const [message, setMessage] = useState('')
 
   const getWeekStart = () => {
@@ -21,35 +24,50 @@ export default function InterestedPage() {
     return start.toISOString().split('T')[0]
   }
 
-  useEffect(() => {
-    const saved = localStorage.getItem('divina_user')
-    if (saved) {
-      setUser(JSON.parse(saved))
-    }
-  }, [])
-
-  const handleSubmit = async (newStatus: string) => {
-    if (!user) return
-
+  const loadPlayers = async () => {
     const weekStart = getWeekStart()
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('weekly_interest')
-      .upsert(
-        {
-          user_id: user.id,
-          week_start: weekStart,
-          status: newStatus,
-        },
-        { onConflict: 'user_id,week_start' }
-      )
+      .select(`
+        id,
+        user_id,
+        status,
+        users (
+          username,
+          display_name
+        )
+      `)
+      .eq('week_start', weekStart)
 
     if (error) {
       setMessage(error.message)
-    } else {
-      setStatus(newStatus)
-      setMessage('Status updated')
+      return
     }
+
+    const formatted = data.map((row: any) => ({
+      id: row.id,
+      user_id: row.user_id,
+      status: row.status,
+      username: row.users.username,
+      display_name: row.users.display_name,
+    }))
+
+    setPlayers(formatted)
+  }
+
+  useEffect(() => {
+    loadPlayers()
+  }, [])
+
+  const renderPlayers = (status: string) => {
+    return players
+      .filter((p) => p.status === status)
+      .map((p) => (
+        <div key={p.id} style={playerCard}>
+          {p.display_name || p.username}
+        </div>
+      ))
   }
 
   return (
@@ -58,37 +76,24 @@ export default function InterestedPage() {
 
       <main style={mainStyle}>
         <div style={{ maxWidth: '420px', margin: '0 auto' }}>
-          <h1 style={titleStyle}>This Week</h1>
+          <h1 style={titleStyle}>This Week Players</h1>
 
-          <p style={{ marginTop: '10px', color: '#A1A1AA' }}>
-            Are you playing this week?
-          </p>
-
-          <div style={{ marginTop: '20px', display: 'grid', gap: '12px' }}>
-            <button onClick={() => handleSubmit('interested')} style={btnGreen}>
-              Interested
-            </button>
-
-            <button onClick={() => handleSubmit('maybe')} style={btnYellow}>
-              Maybe
-            </button>
-
-            <button onClick={() => handleSubmit('unavailable')} style={btnGray}>
-              Not available
-            </button>
+          <div style={section}>
+            <h2 style={green}>Interested</h2>
+            {renderPlayers('interested')}
           </div>
 
-          {status && (
-            <p style={{ marginTop: '16px' }}>
-              Current: <strong>{status}</strong>
-            </p>
-          )}
+          <div style={section}>
+            <h2 style={yellow}>Maybe</h2>
+            {renderPlayers('maybe')}
+          </div>
 
-          {message && (
-            <p style={{ marginTop: '10px', color: '#36D399' }}>
-              {message}
-            </p>
-          )}
+          <div style={section}>
+            <h2 style={gray}>Unavailable</h2>
+            {renderPlayers('unavailable')}
+          </div>
+
+          {message && <p>{message}</p>}
         </div>
       </main>
     </>
@@ -108,29 +113,18 @@ const titleStyle = {
   color: '#E85D04',
 }
 
-const btnGreen = {
-  padding: '14px',
-  background: '#22C55E',
-  border: 'none',
-  borderRadius: '10px',
-  color: 'white',
-  fontWeight: 'bold',
+const section = {
+  marginTop: '20px',
 }
 
-const btnYellow = {
-  padding: '14px',
-  background: '#FACC15',
-  border: 'none',
+const playerCard = {
+  padding: '10px',
+  background: '#15171A',
+  border: '1px solid #2A2D31',
   borderRadius: '10px',
-  color: 'black',
-  fontWeight: 'bold',
+  marginTop: '6px',
 }
 
-const btnGray = {
-  padding: '14px',
-  background: '#1F2937',
-  border: 'none',
-  borderRadius: '10px',
-  color: 'white',
-  fontWeight: 'bold',
-}
+const green = { color: '#22C55E' }
+const yellow = { color: '#FACC15' }
+const gray = { color: '#9CA3AF' }
