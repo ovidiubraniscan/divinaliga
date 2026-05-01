@@ -392,6 +392,36 @@ const clearSinglePlayer = async (ticketCode: string, playerName: string) => {
 
     return sizePenalty + ratingPenalty + positionPenalty + goalkeeperPenalty
   }
+  const getTeamStyle = (index: number) => {
+  if (index === 0) {
+    return {
+      name: 'Red Team',
+      card: redTeamCard,
+      header: redTeamHeader,
+      badge: redTeamBadge,
+    }
+  }
+
+  if (index === 1) {
+    return {
+      name: 'Blue Team',
+      card: blueTeamCard,
+      header: blueTeamHeader,
+      badge: blueTeamBadge,
+    }
+  }
+
+  return {
+    name: 'Lime Team',
+    card: limeTeamCard,
+    header: limeTeamHeader,
+    badge: limeTeamBadge,
+  }
+}
+
+const hasGoalkeeper = (player: Arrival) => {
+  return player.positions.includes('Goalkeeper')
+}
 
   return (
     <>
@@ -589,56 +619,58 @@ const clearSinglePlayer = async (ticketCode: string, playerName: string) => {
 
             <div style={teamButtonsGrid}>
               <button onClick={() => randomizeTeams(2)} style={random2Button}>
-                RANDOMIZE 2 TEAMS
+                CREATE 2 TEAMS (RED & BLUE)
               </button>
 
               <button onClick={() => randomizeTeams(3)} style={random3Button}>
-                RANDOMIZE 3 TEAMS
+                CREATE 3 TEAMS
               </button>
             </div>
 
             {teams.length > 0 && (
               <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
-                {teams.map((team) => {
-                  const average = team.players.length
-                    ? (team.totalRating / team.players.length).toFixed(1)
-                    : '0.0'
+                {teams.map((team, index) => {
+  const average = team.players.length
+    ? (team.totalRating / team.players.length).toFixed(1)
+    : '0.0'
 
-                  return (
-                    <div key={team.name} style={teamCard}>
-                      <div style={sectionHeader}>
-                        <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900 }}>
-                          {team.name}
-                        </h3>
+  const teamStyle = getTeamStyle(index)
 
-                        <p style={avgPill}>Avg {average}/10</p>
-                      </div>
+  return (
+    <div key={team.name} style={teamStyle.card}>
+      <div style={teamStyle.header}>
+        <div>
+          <p style={teamLabel}>TEAM {index + 1}</p>
+          <h3 style={teamName}>{teamStyle.name}</h3>
+        </div>
 
-                      <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
-                        {team.players.map((player) => (
-                          <div key={player.ticket} style={teamPlayerCard}>
-                            <div style={arrivalTop}>
-                              <p style={{ margin: 0, fontWeight: 800 }}>
-                                {player.name}{' '}
-                                {player.captain && (
-                                  <span style={{ color: '#FACC15' }}>(C)</span>
-                                )}
-                              </p>
+        <p style={teamStyle.badge}>Avg {average}/10</p>
+      </div>
 
-                              <p style={{ margin: 0, color: '#86EFAC', fontWeight: 900 }}>
-                                {player.rating}/10
-                              </p>
-                            </div>
+      <div style={{ display: 'grid', gap: '8px', marginTop: '14px' }}>
+        {team.players.map((player) => (
+          <div key={player.ticket} style={teamPlayerCard}>
+            <div style={arrivalTop}>
+              <div>
+                <p style={teamPlayerName}>
+                  {player.captain && <span title="Captain">👑 </span>}
+                  {hasGoalkeeper(player) && <span title="Goalkeeper">🧤 </span>}
+                  {player.name}
+                </p>
 
-                            <p style={{ margin: '4px 0 0', color: '#94A3B8', fontSize: '12px' }}>
-                              {player.positions.join(', ')}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })}
+                <p style={teamPlayerPositions}>
+                  {player.positions.join(', ')}
+                </p>
+              </div>
+
+              <p style={teamRatingPill}>{player.rating}/10</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+})}
               </div>
             )}
           </section>
@@ -973,7 +1005,133 @@ const random3Button = {
   fontWeight: 900,
   cursor: 'pointer',
 }
+const teamLabel = {
+  margin: 0,
+  fontSize: '11px',
+  fontWeight: 900,
+  letterSpacing: '0.18em',
+  color: 'rgba(255,255,255,0.72)',
+  textTransform: 'uppercase' as const,
+}
 
+const teamName = {
+  margin: '3px 0 0',
+  fontSize: '24px',
+  fontWeight: 950,
+  letterSpacing: '-0.04em',
+}
+
+const redTeamCard = {
+  borderRadius: '26px',
+  border: '1px solid rgba(248, 113, 113, 0.45)',
+  background:
+    'linear-gradient(160deg, rgba(127, 29, 29, 0.95), rgba(2, 6, 23, 0.92) 62%)',
+  padding: '16px',
+  boxShadow: '0 18px 45px rgba(239, 68, 68, 0.18)',
+}
+
+const blueTeamCard = {
+  borderRadius: '26px',
+  border: '1px solid rgba(96, 165, 250, 0.45)',
+  background:
+    'linear-gradient(160deg, rgba(30, 64, 175, 0.95), rgba(2, 6, 23, 0.92) 62%)',
+  padding: '16px',
+  boxShadow: '0 18px 45px rgba(59, 130, 246, 0.18)',
+}
+
+const limeTeamCard = {
+  borderRadius: '26px',
+  border: '1px solid rgba(190, 242, 100, 0.45)',
+  background:
+    'linear-gradient(160deg, rgba(77, 124, 15, 0.95), rgba(2, 6, 23, 0.92) 62%)',
+  padding: '16px',
+  boxShadow: '0 18px 45px rgba(132, 204, 22, 0.18)',
+}
+
+const redTeamHeader = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: '12px',
+  color: '#FEE2E2',
+}
+
+const blueTeamHeader = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: '12px',
+  color: '#DBEAFE',
+}
+
+const limeTeamHeader = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: '12px',
+  color: '#ECFCCB',
+}
+
+const redTeamBadge = {
+  margin: 0,
+  borderRadius: '999px',
+  background: 'rgba(254, 202, 202, 0.16)',
+  color: '#FECACA',
+  border: '1px solid rgba(254, 202, 202, 0.28)',
+  padding: '6px 10px',
+  fontSize: '12px',
+  fontWeight: 900,
+  whiteSpace: 'nowrap' as const,
+}
+
+const blueTeamBadge = {
+  margin: 0,
+  borderRadius: '999px',
+  background: 'rgba(191, 219, 254, 0.16)',
+  color: '#BFDBFE',
+  border: '1px solid rgba(191, 219, 254, 0.28)',
+  padding: '6px 10px',
+  fontSize: '12px',
+  fontWeight: 900,
+  whiteSpace: 'nowrap' as const,
+}
+
+const limeTeamBadge = {
+  margin: 0,
+  borderRadius: '999px',
+  background: 'rgba(217, 249, 157, 0.16)',
+  color: '#D9F99D',
+  border: '1px solid rgba(217, 249, 157, 0.28)',
+  padding: '6px 10px',
+  fontSize: '12px',
+  fontWeight: 900,
+  whiteSpace: 'nowrap' as const,
+}
+
+const teamPlayerName = {
+  margin: 0,
+  fontSize: '15px',
+  fontWeight: 900,
+  color: '#F8FAFC',
+}
+
+const teamPlayerPositions = {
+  margin: '5px 0 0',
+  color: '#CBD5E1',
+  fontSize: '12px',
+}
+
+const teamRatingPill = {
+  margin: 0,
+  borderRadius: '999px',
+  background: 'rgba(255,255,255,0.13)',
+  border: '1px solid rgba(255,255,255,0.18)',
+  color: '#FFFFFF',
+  padding: '5px 9px',
+  fontSize: '12px',
+  fontWeight: 950,
+  whiteSpace: 'nowrap' as const,
+}
 const teamCard = {
   borderRadius: '24px',
   border: '1px solid #334155',
