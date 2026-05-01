@@ -60,6 +60,7 @@ export default function CheckInPage() {
   const [scannerOpen, setScannerOpen] = useState(false)
   const [currentTicket, setCurrentTicket] = useState<string | null>(null)
   const [invalidMessage, setInvalidMessage] = useState('')
+  const [manualTicketNumber, setManualTicketNumber] = useState('')
 
   const [playerName, setPlayerName] = useState('')
   const [selectedPositions, setSelectedPositions] = useState<string[]>([])
@@ -92,6 +93,27 @@ export default function CheckInPage() {
     setSelectedPositions([])
     setIsCaptain(false)
     setSelectedRating(0)
+  }
+
+  const validateTicket = async (ticket: string) => {
+    setInvalidMessage('')
+
+    if (!validTickets.includes(ticket)) {
+      setInvalidMessage(`Invalid ticket: ${ticket}`)
+      return
+    }
+
+    const alreadyUsed = arrivals.some((player) => player.ticket === ticket)
+
+    if (alreadyUsed) {
+      setInvalidMessage(`This ticket has already checked in: ${ticket}`)
+      return
+    }
+
+    await stopScanner()
+
+    resetForm()
+    setCurrentTicket(ticket)
   }
 
   const startScanner = async () => {
@@ -156,23 +178,21 @@ export default function CheckInPage() {
 
   const handleScanSuccess = async (decodedText: string) => {
     const ticket = decodedText.trim()
+    await validateTicket(ticket)
+  }
 
-    await stopScanner()
+  const handleManualTicketSubmit = async () => {
+    const cleanedNumber = manualTicketNumber.replace(/\D/g, '')
 
-    if (!validTickets.includes(ticket)) {
-      setInvalidMessage(`Invalid ticket: ${ticket}`)
+    if (!cleanedNumber) {
+      setInvalidMessage('Please enter the ticket numbers.')
       return
     }
 
-    const alreadyUsed = arrivals.some((player) => player.ticket === ticket)
+    const ticket = `TCK-${cleanedNumber}`
 
-    if (alreadyUsed) {
-      setInvalidMessage(`This ticket has already checked in: ${ticket}`)
-      return
-    }
-
-    resetForm()
-    setCurrentTicket(ticket)
+    await validateTicket(ticket)
+    setManualTicketNumber('')
   }
 
   const togglePosition = (position: string) => {
@@ -187,7 +207,7 @@ export default function CheckInPage() {
     const name = playerName.trim()
 
     if (!currentTicket) {
-      alert('Please scan a valid ticket first.')
+      alert('Please scan or enter a valid ticket first.')
       return
     }
 
@@ -297,7 +317,7 @@ export default function CheckInPage() {
             <p style={eyebrowStyle}>Divina Liga</p>
             <h1 style={titleStyle}>Match Check-In</h1>
             <p style={subtitleStyle}>
-              Scan a ticket, confirm the player, then create balanced teams.
+              Scan a ticket or enter the ticket code manually, confirm the player, then create balanced teams.
             </p>
           </header>
 
@@ -305,6 +325,29 @@ export default function CheckInPage() {
             <button onClick={startScanner} style={startButton}>
               START CHECK-IN
             </button>
+
+            <div style={manualTicketBox}>
+              <p style={labelText}>Enter ticket manually</p>
+
+              <div style={manualTicketRow}>
+                <div style={ticketPrefix}>TCK-</div>
+
+                <input
+                  value={manualTicketNumber}
+                  onChange={(e) => {
+                    const onlyNumbers = e.target.value.replace(/\D/g, '')
+                    setManualTicketNumber(onlyNumbers)
+                  }}
+                  placeholder="839201"
+                  inputMode="numeric"
+                  style={manualTicketInput}
+                />
+              </div>
+
+              <button onClick={handleManualTicketSubmit} style={manualTicketButton}>
+                Check Ticket Code
+              </button>
+            </div>
 
             {scannerOpen && (
               <div style={{ marginTop: '14px' }}>
@@ -403,11 +446,7 @@ export default function CheckInPage() {
               </div>
             )}
 
-            {invalidMessage && (
-              <div style={invalidBox}>
-                {invalidMessage}
-              </div>
-            )}
+            {invalidMessage && <div style={invalidBox}>{invalidMessage}</div>}
           </section>
 
           <section style={glassCard}>
@@ -564,6 +603,50 @@ const startButton = {
   color: '#052E16',
   padding: '16px 20px',
   fontSize: '18px',
+  fontWeight: 900,
+  cursor: 'pointer',
+}
+
+const manualTicketBox = {
+  marginTop: '14px',
+  display: 'grid',
+  gap: '10px',
+}
+
+const manualTicketRow = {
+  display: 'flex',
+  alignItems: 'center',
+  borderRadius: '14px',
+  border: '1px solid #475569',
+  background: '#020617',
+  overflow: 'hidden',
+}
+
+const ticketPrefix = {
+  padding: '13px 12px',
+  background: '#111827',
+  color: '#6EE7B7',
+  fontWeight: 900,
+  borderRight: '1px solid #334155',
+}
+
+const manualTicketInput = {
+  flex: 1,
+  border: 'none',
+  background: 'transparent',
+  color: 'white',
+  padding: '13px 12px',
+  outline: 'none',
+  fontSize: '16px',
+}
+
+const manualTicketButton = {
+  width: '100%',
+  border: '1px solid rgba(110, 231, 183, 0.35)',
+  borderRadius: '14px',
+  background: 'rgba(34, 197, 94, 0.12)',
+  color: '#6EE7B7',
+  padding: '13px',
   fontWeight: 900,
   cursor: 'pointer',
 }
