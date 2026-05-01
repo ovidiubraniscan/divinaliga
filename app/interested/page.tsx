@@ -17,8 +17,6 @@ type Player = {
   display_name: string | null
 }
 
-const dayStats = calculateDayStats()
-
 const days = [
   'Sunday',
   'Monday',
@@ -66,13 +64,13 @@ export default function InterestedPage() {
       return
     }
 
-    const formatted = data.map((row: any) => ({
+    const formatted = (data || []).map((row: any) => ({
       id: row.id,
       user_id: row.user_id,
       status: row.status,
       day_statuses: row.day_statuses || {},
-      username: row.users.username,
-      display_name: row.users.display_name,
+      username: row.users?.username || 'Unknown',
+      display_name: row.users?.display_name || null,
     }))
 
     setPlayers(formatted)
@@ -159,6 +157,28 @@ export default function InterestedPage() {
     loadPlayers()
   }
 
+  const calculateDayStats = () => {
+    const stats: Record<string, { interested: number; maybe: number }> = {}
+
+    days.forEach((day) => {
+      stats[day] = { interested: 0, maybe: 0 }
+    })
+
+    players.forEach((player) => {
+      const statuses = player.day_statuses || {}
+
+      Object.entries(statuses).forEach(([day, status]) => {
+        if (!stats[day]) return
+        if (status === 'interested') stats[day].interested++
+        if (status === 'maybe') stats[day].maybe++
+      })
+    })
+
+    return stats
+  }
+
+  const dayStats = calculateDayStats()
+
   const getDayButtonStyle = (currentStatus: string | undefined) => {
     let background = '#15171A'
     let borderColor = '#2A2D31'
@@ -194,24 +214,6 @@ export default function InterestedPage() {
     if (status === 'unavailable') return 'Not available'
     return 'Not selected'
   }
-const calculateDayStats = () => {
-  const stats: Record<string, { interested: number; maybe: number }> = {}
-
-  days.forEach((day) => {
-    stats[day] = { interested: 0, maybe: 0 }
-  })
-
-  players.forEach((player) => {
-    const statuses = player.day_statuses || {}
-
-    Object.entries(statuses).forEach(([day, status]) => {
-      if (status === 'interested') stats[day].interested++
-      if (status === 'maybe') stats[day].maybe++
-    })
-  })
-
-  return stats
-}
 
   return (
     <>
@@ -268,29 +270,31 @@ const calculateDayStats = () => {
               {message}
             </p>
           )}
-<div style={section}>
-  <h2 style={{ color: '#E85D04' }}>Best Days</h2>
 
-  {days.map((day) => {
-    const stat = dayStats[day]
+          <div style={section}>
+            <h2 style={{ color: '#E85D04' }}>Best Days</h2>
 
-    return (
-      <div key={day} style={playerCard}>
-        <strong>{day}</strong>
+            {days.map((day) => {
+              const stat = dayStats[day]
 
-        <div style={{ marginTop: '6px', fontSize: '14px' }}>
-          <span style={{ color: '#22C55E' }}>
-            {stat.interested} interested
-          </span>
-          {' / '}
-          <span style={{ color: '#FACC15' }}>
-            {stat.maybe} maybe
-          </span>
-        </div>
-      </div>
-    )
-  })}
-</div>
+              return (
+                <div key={day} style={playerCard}>
+                  <strong>{day}</strong>
+
+                  <div style={{ marginTop: '6px', fontSize: '14px' }}>
+                    <span style={{ color: '#22C55E' }}>
+                      {stat.interested} interested
+                    </span>
+                    {' / '}
+                    <span style={{ color: '#FACC15' }}>
+                      {stat.maybe} maybe
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
           <div style={section}>
             <h2 style={{ color: '#E85D04' }}>Players this week</h2>
 
