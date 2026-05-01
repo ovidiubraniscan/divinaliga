@@ -56,6 +56,8 @@ const validTickets = [
 
 const positions = ['Goalkeeper', 'Defender', 'Midfield', 'Attacker']
 
+const ADMIN_PIN = '3037'
+
 export default function CheckInPage() {
   const scannerRef = useRef<Html5Qrcode | null>(null)
 
@@ -284,6 +286,13 @@ const validateTicket = async (ticket: string) => {
 }
 
 const clearArrivals = async () => {
+  const pin = prompt('Enter admin PIN to clear all players:')
+
+  if (pin !== ADMIN_PIN) {
+    alert('Incorrect PIN.')
+    return
+  }
+
   if (!confirm('Clear all checked-in players?')) return
 
   const { error } = await supabase
@@ -299,6 +308,32 @@ const clearArrivals = async () => {
   setArrivals([])
   setTeams([])
 }
+const clearSinglePlayer = async (ticketCode: string, playerName: string) => {
+  const pin = prompt(`Enter admin PIN to remove ${playerName}:`)
+
+  if (pin !== ADMIN_PIN) {
+    alert('Incorrect PIN.')
+    return
+  }
+
+  if (!confirm(`Remove ${playerName} from check-in list?`)) return
+
+  const { error } = await supabase
+    .from('check_ins')
+    .delete()
+    .eq('ticket_code', ticketCode)
+
+  if (error) {
+    setInvalidMessage(error.message)
+    return
+  }
+
+  const updatedArrivals = arrivals.filter((player) => player.ticket !== ticketCode)
+
+  setArrivals(updatedArrivals)
+  setTeams([])
+}
+
 
   const ratingColour = (value: number) => {
     const hue = Math.round(((value - 1) * 120) / 9)
@@ -537,6 +572,12 @@ const clearArrivals = async () => {
                     <p style={{ margin: '6px 0 0', color: '#64748B', fontSize: '12px' }}>
                       Arrived: {player.arrivalTime}
                     </p>
+                    <button
+  onClick={() => clearSinglePlayer(player.ticket, player.name)}
+  style={removePlayerButton}
+>
+  Remove Player
+</button>
                   </div>
                 ))}
               </div>
@@ -892,6 +933,18 @@ const ratingPill = {
   padding: '4px 8px',
   fontSize: '12px',
   fontWeight: 900,
+}
+const removePlayerButton = {
+  width: '100%',
+  marginTop: '10px',
+  borderRadius: '10px',
+  border: '1px solid rgba(239, 68, 68, 0.45)',
+  background: 'rgba(239, 68, 68, 0.08)',
+  color: '#FCA5A5',
+  padding: '9px 10px',
+  fontSize: '12px',
+  fontWeight: 800,
+  cursor: 'pointer',
 }
 
 const teamButtonsGrid = {
