@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import NavBar from '@/components/NavBar'
 import { Html5Qrcode } from 'html5-qrcode'
+import { supabase } from '@/lib/supabase'
+
 
 type Arrival = {
   name: string
@@ -70,22 +72,40 @@ export default function CheckInPage() {
   const [arrivals, setArrivals] = useState<Arrival[]>([])
   const [teams, setTeams] = useState<Team[]>([])
 
-  useEffect(() => {
-    const saved = localStorage.getItem('divina_arrivals')
+  const loadArrivals = async () => {
+  const { data, error } = await supabase
+    .from('check_ins')
+    .select('ticket_code, player_name, positions, captain, rating, arrival_time')
+    .order('arrival_time', { ascending: true })
 
-    if (saved) {
-      setArrivals(JSON.parse(saved))
-    }
-
-    return () => {
-      stopScanner()
-    }
-  }, [])
-
-  const saveArrivals = (updated: Arrival[]) => {
-    setArrivals(updated)
-    localStorage.setItem('divina_arrivals', JSON.stringify(updated))
+  if (error) {
+    setInvalidMessage(error.message)
+    return
   }
+
+  const formatted: Arrival[] = (data || []).map((row) => ({
+    name: row.player_name,
+    ticket: row.ticket_code,
+    positions: row.positions || [],
+    captain: row.captain,
+    rating: row.rating,
+    arrivalTime: new Date(row.arrival_time).toLocaleString(),
+  }))
+
+  setArrivals(formatted)
+}
+
+useEffect(() => {
+  loadArrivals()
+
+  return () => {
+    stopScanner()
+  }
+}, [])
+
+const saveArrivals = (updated: Arrival[]) => {
+  setArrivals(updated)
+}
 
   const resetForm = () => {
     setCurrentTicket(null)
@@ -95,26 +115,46 @@ export default function CheckInPage() {
     setSelectedRating(0)
   }
 
-  const validateTicket = async (ticket: string) => {
-    setInvalidMessage('')
+const validateTicket = async (ticket: string) => {
+  setInvalidMessage('')
 
-    if (!validTickets.includes(ticket)) {
-      setInvalidMessage(`Invalid ticket: ${ticket}`)
-      return
-    }
+  const { data: ticketData, error: ticketError } = await supabase
+    .from('tickets')
+    .select('code, status')
+    .eq('code', ticket)
+    .maybeSingle()
 
-    const alreadyUsed = arrivals.some((player) => player.ticket === ticket)
-
-    if (alreadyUsed) {
-      setInvalidMessage(`This ticket has already checked in: ${ticket}`)
-      return
-    }
-
-    await stopScanner()
-
-    resetForm()
-    setCurrentTicket(ticket)
+  if (ticketError) {
+    setInvalidMessage(ticketError.message)
+    return
   }
+
+  if (!ticketData || ticketData.status !== 'valid') {
+    setInvalidMessage(`Invalid ticket: ${ticket}`)
+    return
+  }
+
+  const { data: existingCheckIn, error: checkInError } = await supabase
+    .from('check_ins')
+    .select('ticket_code')
+    .eq('ticket_code', ticket)
+    .maybeSingle()
+
+  if (checkInError) {
+    setInvalidMessage(checkInError.message)
+    return
+  }
+
+  if (existingCheckIn) {
+    setInvalidMessage(`This ticket has already checked in: ${ticket}`)
+    return
+  }
+
+  await stopScanner()
+
+  resetForm()
+  setCurrentTicket(ticket)
+}
 
   const startScanner = async () => {
     setInvalidMessage('')
@@ -203,51 +243,62 @@ export default function CheckInPage() {
     }
   }
 
-  const handleArrived = () => {
-    const name = playerName.trim()
+ const handleArrived = async () => {
+  const name = playerName.trim()
 
-    if (!currentTicket) {
-      alert('Please scan or enter a valid ticket first.')
-      return
-    }
-
-    if (!name) {
-      alert("Please insert the player's name.")
-      return
-    }
-
-    if (!selectedPositions.length) {
-      alert('Please select at least one football position.')
-      return
-    }
-
-    if (!selectedRating) {
-      alert('Please select a rating from 1 to 10.')
-      return
-    }
-
-    const updatedArrivals = [
-      ...arrivals,
-      {
-        name,
-        ticket: currentTicket,
-        positions: selectedPositions,
-        captain: isCaptain,
-        rating: selectedRating,
-        arrivalTime: new Date().toLocaleString(),
-      },
-    ]
-
-    saveArrivals(updatedArrivals)
-    resetForm()
+  if (!currentTicket) {
+    alert('Please scan or enter a valid ticket first.')
+    return
   }
 
-  const clearArrivals = () => {
-    if (!confirm('Clear all checked-in players?')) return
-
-    saveArrivals([])
-    setTeams([])
+  if (!name) {
+    alert("Please insert the player's name.")
+    return
   }
+
+  if (!selectedPositions.length) {
+    alert('Please select at least one football position.')
+    return
+  }
+
+  if (!selectedRating) {
+    alert('Please select a rating from 1 to 10.')
+    return
+  }
+
+  const { error } = await supabase.from('check_ins').insert({
+    ticket_code: currentTicket,
+    player_name: name,
+    positions: selectedPositions,
+    captain: isCaptain,
+    rating: selectedRating,
+  })
+
+  if (error) {
+    setInvalidMessage(error.message)
+    return
+  }
+
+  await loadArrivals()
+  resetForm()
+}
+
+const clearArrivals = async () => {
+  if (!confirm('Clear all checked-in players?')) return
+
+  const { error } = await supabase
+    .from('check_ins')
+    .delete()
+    .neq('ticket_code', '')
+
+  if (error) {
+    setInvalidMessage(error.message)
+    return
+  }
+
+  setArrivals([])
+  setTeams([])
+}
 
   const ratingColour = (value: number) => {
     const hue = Math.round(((value - 1) * 120) / 9)
