@@ -76,6 +76,12 @@ export default function CheckInPage() {
   const [adminPassword, setAdminPassword] = useState("");
   const [adminMessage, setAdminMessage] = useState("");
   const [adminLoading, setAdminLoading] = useState(false);
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+
+  const [playerToRemove, setPlayerToRemove] = useState<Arrival | null>(null);
+  const [clearAllConfirmOpen, setClearAllConfirmOpen] = useState(false);
+  const [isRemovingPlayer, setIsRemovingPlayer] = useState(false);
+  const [isClearingPlayers, setIsClearingPlayers] = useState(false);
 
   const [editingPlayer, setEditingPlayer] = useState<Arrival | null>(null);
   const [editName, setEditName] = useState("");
@@ -122,6 +128,7 @@ export default function CheckInPage() {
 
     await checkAdminStatus();
     setAdminPassword("");
+    setAdminPanelOpen(false);
     setAdminLoading(false);
   };
 
@@ -130,6 +137,7 @@ export default function CheckInPage() {
     setIsAdmin(false);
     setAdminEmail("");
     setAdminPassword("");
+    setAdminPanelOpen(false);
     setAdminMessage("Admin logged out.");
   };
 
@@ -354,24 +362,36 @@ export default function CheckInPage() {
     resetForm();
   };
 
+  const openClearAllConfirm = () => {
+    if (!isAdmin) {
+      setInvalidMessage("Admin login required to clear players.");
+      return;
+    }
+
+    setClearAllConfirmOpen(true);
+  };
+
   const clearArrivals = async () => {
     if (!isAdmin) {
       setInvalidMessage("Admin login required to clear players.");
       return;
     }
 
-    if (!confirm("Clear all checked-in players?")) return;
+    setIsClearingPlayers(true);
 
     const { error } = await supabase
       .from("check_ins")
       .delete()
       .neq("ticket_code", "");
 
+    setIsClearingPlayers(false);
+
     if (error) {
       setInvalidMessage(error.message);
       return;
     }
 
+    setClearAllConfirmOpen(false);
     setArrivals([]);
     setTeams([]);
   };
@@ -449,18 +469,26 @@ export default function CheckInPage() {
     closeEditPlayerModal();
   };
 
-  const clearSinglePlayer = async (ticketCode: string, playerName: string) => {
+  const openRemovePlayerConfirm = (player: Arrival) => {
     if (!isAdmin) {
       setInvalidMessage("Admin login required to remove players.");
       return;
     }
 
-    if (!confirm(`Remove ${playerName} from check-in list?`)) return;
+    setPlayerToRemove(player);
+  };
+
+  const clearSinglePlayer = async () => {
+    if (!playerToRemove || !isAdmin) return;
+
+    setIsRemovingPlayer(true);
 
     const { error } = await supabase
       .from("check_ins")
       .delete()
-      .eq("ticket_code", ticketCode);
+      .eq("ticket_code", playerToRemove.ticket);
+
+    setIsRemovingPlayer(false);
 
     if (error) {
       setInvalidMessage(error.message);
@@ -468,9 +496,10 @@ export default function CheckInPage() {
     }
 
     const updatedArrivals = arrivals.filter(
-      (player) => player.ticket !== ticketCode,
+      (player) => player.ticket !== playerToRemove.ticket,
     );
 
+    setPlayerToRemove(null);
     setArrivals(updatedArrivals);
     setTeams([]);
   };
@@ -578,57 +607,77 @@ export default function CheckInPage() {
             </p>
           </header>
 
-          <section style={glassCard}>
-            <div style={sectionHeader}>
-              <div>
-                <h2 style={sectionTitle}>Admin Access</h2>
-                <p style={adminStatusText}>
-                  {isAdmin
-                    ? "Logged in as admin. Edit, remove, and clear controls are active."
-                    : "Log in to unlock edit, remove, and clear controls."}
-                </p>
-              </div>
+          <div style={adminFloatingWrap}>
+            <button
+              onClick={() => setAdminPanelOpen(!adminPanelOpen)}
+              style={{
+                ...adminFloatingButton,
+                ...(isAdmin ? adminFloatingButtonActive : {}),
+              }}
+              title="Admin access"
+            >
+              {isAdmin ? "🔓" : "🔐"}
+            </button>
+          </div>
 
-              {isAdmin && (
-                <button onClick={adminLogout} style={adminLogoutButton}>
-                  Logout
-                </button>
-              )}
-            </div>
-
-            {!isAdmin && (
-              <div style={adminLoginBox}>
-                <input
-                  value={adminEmail}
-                  onChange={(e) => setAdminEmail(e.target.value)}
-                  placeholder="Admin email"
-                  type="email"
-                  style={inputStyle}
-                />
-
-                <input
-                  value={adminPassword}
-                  onChange={(e) => setAdminPassword(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") adminLogin();
-                  }}
-                  placeholder="Admin password"
-                  type="password"
-                  style={inputStyle}
-                />
+          {adminPanelOpen && (
+            <section style={glassCard}>
+              <div style={sectionHeader}>
+                <div>
+                  <h2 style={sectionTitle}>Admin Access</h2>
+                  <p style={adminStatusText}>
+                    {isAdmin
+                      ? "Logged in as admin. Edit, remove, and clear controls are active."
+                      : "Log in to unlock edit, remove, and clear controls."}
+                  </p>
+                </div>
 
                 <button
-                  onClick={adminLogin}
-                  disabled={adminLoading}
-                  style={adminLoginButton}
+                  onClick={() => setAdminPanelOpen(false)}
+                  style={modalCloseButton}
                 >
-                  {adminLoading ? "Checking..." : "Admin Login"}
+                  ×
                 </button>
               </div>
-            )}
 
-            {adminMessage && <p style={adminMessageText}>{adminMessage}</p>}
-          </section>
+              {isAdmin ? (
+                <button onClick={adminLogout} style={adminLogoutButton}>
+                  Logout Admin
+                </button>
+              ) : (
+                <div style={adminLoginBox}>
+                  <input
+                    value={adminEmail}
+                    onChange={(e) => setAdminEmail(e.target.value)}
+                    placeholder="Admin email"
+                    type="email"
+                    style={inputStyle}
+                  />
+
+                  <input
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") adminLogin();
+                    }}
+                    placeholder="Admin password"
+                    type="password"
+                    style={inputStyle}
+                  />
+
+                  <button
+                    onClick={adminLogin}
+                    disabled={adminLoading}
+                    style={adminLoginButton}
+                  >
+                    {adminLoading ? "Checking..." : "Admin Login"}
+                  </button>
+                </div>
+              )}
+
+              {adminMessage && <p style={adminMessageText}>{adminMessage}</p>}
+            </section>
+          )}
 
           <section style={glassCard}>
             <button onClick={startScanner} style={startButton}>
@@ -765,7 +814,7 @@ export default function CheckInPage() {
             <div style={sectionHeader}>
               <h2 style={sectionTitle}>Arrived Players</h2>
               {isAdmin && (
-                <button onClick={clearArrivals} style={clearButton}>
+                <button onClick={openClearAllConfirm} style={clearButton}>
                   Clear
                 </button>
               )}
@@ -828,9 +877,7 @@ export default function CheckInPage() {
                         </button>
 
                         <button
-                          onClick={() =>
-                            clearSinglePlayer(player.ticket, player.name)
-                          }
+                          onClick={() => openRemovePlayerConfirm(player)}
                           style={removePlayerButton}
                         >
                           Remove Player
@@ -1010,9 +1057,93 @@ export default function CheckInPage() {
           </div>
         </div>
       )}
+
+      {playerToRemove && (
+        <div style={modalOverlay}>
+          <div style={modalCard}>
+            <p style={smallGreenText}>Confirm Remove</p>
+            <h2 style={sectionTitle}>Remove {playerToRemove.name}?</h2>
+            <p style={confirmText}>
+              This will delete the player from the check-in list. The ticket can
+              then be checked in again if needed.
+            </p>
+
+            <div style={confirmActions}>
+              <button
+                onClick={() => setPlayerToRemove(null)}
+                disabled={isRemovingPlayer}
+                style={confirmNoButton}
+              >
+                No
+              </button>
+
+              <button
+                onClick={clearSinglePlayer}
+                disabled={isRemovingPlayer}
+                style={confirmYesButton}
+              >
+                {isRemovingPlayer ? "Removing..." : "Yes, Remove"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {clearAllConfirmOpen && (
+        <div style={modalOverlay}>
+          <div style={modalCard}>
+            <p style={smallGreenText}>Confirm Clear</p>
+            <h2 style={sectionTitle}>Clear all players?</h2>
+            <p style={confirmText}>
+              This will remove every checked-in player and reset created teams.
+            </p>
+
+            <div style={confirmActions}>
+              <button
+                onClick={() => setClearAllConfirmOpen(false)}
+                disabled={isClearingPlayers}
+                style={confirmNoButton}
+              >
+                No
+              </button>
+
+              <button
+                onClick={clearArrivals}
+                disabled={isClearingPlayers}
+                style={confirmYesButton}
+              >
+                {isClearingPlayers ? "Clearing..." : "Yes, Clear All"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
+
+const adminFloatingWrap = {
+  display: "flex",
+  justifyContent: "flex-end",
+  margin: "-2px 0 10px",
+};
+
+const adminFloatingButton = {
+  width: "44px",
+  height: "44px",
+  borderRadius: "999px",
+  border: "1px solid rgba(148, 163, 184, 0.35)",
+  background: "rgba(15, 23, 42, 0.82)",
+  color: "#E2E8F0",
+  fontSize: "20px",
+  cursor: "pointer",
+  boxShadow: "0 12px 35px rgba(0,0,0,0.3)",
+};
+
+const adminFloatingButtonActive = {
+  border: "1px solid rgba(250, 204, 21, 0.6)",
+  background: "rgba(250, 204, 21, 0.16)",
+};
 
 const adminStatusText = {
   margin: "6px 0 0",
@@ -1114,6 +1245,40 @@ const editModalBody = {
   marginTop: "16px",
   display: "grid",
   gap: "14px",
+};
+
+const confirmText = {
+  margin: "12px 0 0",
+  color: "#CBD5E1",
+  fontSize: "14px",
+  lineHeight: 1.5,
+};
+
+const confirmActions = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: "10px",
+  marginTop: "18px",
+};
+
+const confirmNoButton = {
+  borderRadius: "14px",
+  border: "1px solid #475569",
+  background: "transparent",
+  color: "#E2E8F0",
+  padding: "13px",
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const confirmYesButton = {
+  borderRadius: "14px",
+  border: "1px solid rgba(239, 68, 68, 0.5)",
+  background: "rgba(239, 68, 68, 0.16)",
+  color: "#FCA5A5",
+  padding: "13px",
+  fontWeight: 900,
+  cursor: "pointer",
 };
 
 const pageStyle = {
