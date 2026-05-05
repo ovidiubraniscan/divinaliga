@@ -373,13 +373,6 @@ const validateTicket = async (ticket: string) => {
 }
 
 const clearArrivals = async () => {
-  const pin = prompt('Enter admin PIN to clear all players:')
-
-  if (pin !== ADMIN_PIN) {
-    alert('Incorrect PIN.')
-    return
-  }
-
   if (!confirm('Clear all checked-in players?')) return
 
   const { error } = await supabase
@@ -395,14 +388,8 @@ const clearArrivals = async () => {
   setArrivals([])
   setTeams([])
 }
+
 const openEditPlayerModal = (player: Arrival) => {
-  const pin = prompt(`Enter admin PIN to edit ${player.name}:`)
-
-  if (pin !== ADMIN_PIN) {
-    alert('Incorrect PIN.')
-    return
-  }
-
   setEditingPlayer(player)
   setEditName(player.name)
   setEditPositions(player.positions)
