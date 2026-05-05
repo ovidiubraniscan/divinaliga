@@ -76,6 +76,13 @@ export default function CheckInPage() {
   const [checkInOpen, setCheckInOpen] = useState(true)
   const [isSubmittingArrival, setIsSubmittingArrival] = useState(false)
 
+  const [editingPlayer, setEditingPlayer] = useState<Arrival | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editPositions, setEditPositions] = useState<string[]>([])
+  const [editCaptain, setEditCaptain] = useState(false)
+  const [editRating, setEditRating] = useState(0)
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+
   const loadArrivals = async () => {
   const { data, error } = await supabase
     .from('check_ins')
@@ -388,7 +395,7 @@ const clearArrivals = async () => {
   setArrivals([])
   setTeams([])
 }
-const editSinglePlayer = async (player: Arrival) => {
+const openEditPlayerModal = (player: Arrival) => {
   const pin = prompt(`Enter admin PIN to edit ${player.name}:`)
 
   if (pin !== ADMIN_PIN) {
@@ -396,47 +403,67 @@ const editSinglePlayer = async (player: Arrival) => {
     return
   }
 
-  const newName = prompt('Edit player name:', player.name)?.trim()
+  setEditingPlayer(player)
+  setEditName(player.name)
+  setEditPositions(player.positions)
+  setEditCaptain(player.captain)
+  setEditRating(player.rating)
+}
 
-  if (!newName) return
+const closeEditPlayerModal = () => {
+  if (isSavingEdit) return
 
-  const newRatingInput = prompt('Edit rating from 1 to 10:', String(player.rating))
-  const newRating = Number(newRatingInput)
+  setEditingPlayer(null)
+  setEditName('')
+  setEditPositions([])
+  setEditCaptain(false)
+  setEditRating(0)
+}
 
-  if (!Number.isInteger(newRating) || newRating < 1 || newRating > 10) {
+const toggleEditPosition = (position: string) => {
+  if (editPositions.includes(position)) {
+    setEditPositions(editPositions.filter((item) => item !== position))
+  } else {
+    setEditPositions([...editPositions, position])
+  }
+}
+
+const submitPlayerEdit = async () => {
+  if (!editingPlayer) return
+
+  const cleanedName = editName.trim()
+
+  if (!cleanedName) {
+    playTone('error')
+    alert("Please insert the player's name.")
+    return
+  }
+
+  if (!editPositions.length) {
+    playTone('error')
+    alert('Please select at least one football position.')
+    return
+  }
+
+  if (!Number.isInteger(editRating) || editRating < 1 || editRating > 10) {
+    playTone('error')
     alert('Rating must be a number from 1 to 10.')
     return
   }
 
-  const newPositionsInput = prompt(
-    'Edit positions, separated by commas. Options: Goalkeeper, Defender, Midfield, Attacker',
-    player.positions.join(', ')
-  )
-
-  if (!newPositionsInput) return
-
-  const cleanedPositions = newPositionsInput
-    .split(',')
-    .map((item) => item.trim())
-    .filter((item) => positions.includes(item))
-
-  if (!cleanedPositions.length) {
-    alert('Please enter at least one valid position.')
-    return
-  }
-
-  const captainAnswer = prompt('Captain? Type yes or no:', player.captain ? 'yes' : 'no')
-  const updatedCaptain = captainAnswer?.toLowerCase().startsWith('y') || false
+  setIsSavingEdit(true)
 
   const { error } = await supabase
     .from('check_ins')
     .update({
-      player_name: newName,
-      positions: cleanedPositions,
-      captain: updatedCaptain,
-      rating: newRating,
+      player_name: cleanedName,
+      positions: editPositions,
+      captain: editCaptain,
+      rating: editRating,
     })
-    .eq('ticket_code', player.ticket)
+    .eq('ticket_code', editingPlayer.ticket)
+
+  setIsSavingEdit(false)
 
   if (error) {
     playTone('error')
@@ -447,6 +474,7 @@ const editSinglePlayer = async (player: Arrival) => {
   playTone('success')
   await loadArrivals()
   setTeams([])
+  closeEditPlayerModal()
 }
 const clearSinglePlayer = async (ticketCode: string, playerName: string) => {
   const pin = prompt(`Enter admin PIN to remove ${playerName}:`)
@@ -583,6 +611,107 @@ const hasGoalkeeper = (player: Arrival) => {
   return (
     <>
       <NavBar />
+
+      {editingPlayer && (
+        <div style={modalOverlay}>
+          <div style={modalCard}>
+            <div style={modalHeader}>
+              <div>
+                <p style={smallGreenText}>Edit Player</p>
+                <h2 style={modalTitle}>{editingPlayer.ticket}</h2>
+              </div>
+
+              <button onClick={closeEditPlayerModal} style={modalCloseButton}>
+                ×
+              </button>
+            </div>
+
+            <label style={labelStyle}>
+              <span style={labelText}>Player name</span>
+              <input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Player name"
+                style={inputStyle}
+              />
+            </label>
+
+            <div>
+              <p style={labelText}>Football position · {editPositions.length} selected</p>
+
+              <div style={positionGrid}>
+                {positions.map((position) => {
+                  const active = editPositions.includes(position)
+
+                  return (
+                    <button
+                      key={position}
+                      onClick={() => toggleEditPosition(position)}
+                      style={{
+                        ...positionButton,
+                        ...(active ? activePositionButton : {}),
+                      }}
+                    >
+                      {position.toUpperCase()}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <button
+              onClick={() => setEditCaptain(!editCaptain)}
+              style={{
+                ...captainButton,
+                ...(editCaptain ? activeCaptainButton : {}),
+              }}
+            >
+              {editCaptain ? 'CAPTAIN SELECTED' : 'CAPTAIN'}
+            </button>
+
+            <div>
+              <div style={ratingHeader}>
+                <p style={labelText}>Rating</p>
+                <p style={{ margin: 0, fontWeight: 900 }}>{editRating}/10</p>
+              </div>
+
+              <div style={starsWrap}>
+                {Array.from({ length: 10 }, (_, index) => {
+                  const value = index + 1
+
+                  return (
+                    <button
+                      key={value}
+                      onClick={() => setEditRating(value)}
+                      style={{
+                        ...starButton,
+                        color: ratingColour(value),
+                        opacity: value <= editRating ? 1 : 0.25,
+                      }}
+                    >
+                      ★
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div style={modalActions}>
+              <button onClick={closeEditPlayerModal} style={modalCancelButton}>
+                Cancel
+              </button>
+
+              <button
+                onClick={submitPlayerEdit}
+                disabled={isSavingEdit}
+                style={{ ...modalSubmitButton, ...(isSavingEdit ? disabledButton : {}) }}
+              >
+                {isSavingEdit ? 'SAVING...' : 'SUBMIT CHANGES'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main style={pageStyle}>
         <div style={{ maxWidth: '430px', margin: '0 auto' }}>
@@ -786,7 +915,7 @@ const hasGoalkeeper = (player: Arrival) => {
                     </p>
                     <div style={playerActionsRow}>
                       <button
-                        onClick={() => editSinglePlayer(player)}
+                        onClick={() => openEditPlayerModal(player)}
                         style={editPlayerButton}
                       >
                         Edit Player
@@ -873,6 +1002,84 @@ const hasGoalkeeper = (player: Arrival) => {
       </main>
     </>
   )
+}
+
+const modalOverlay = {
+  position: 'fixed' as const,
+  inset: 0,
+  zIndex: 1000,
+  background: 'rgba(2, 6, 23, 0.78)',
+  backdropFilter: 'blur(10px)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '16px',
+}
+
+const modalCard = {
+  width: '100%',
+  maxWidth: '430px',
+  maxHeight: '90vh',
+  overflowY: 'auto' as const,
+  borderRadius: '26px',
+  border: '1px solid rgba(255, 255, 255, 0.12)',
+  background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.98))',
+  boxShadow: '0 30px 80px rgba(0,0,0,0.55)',
+  padding: '18px',
+  display: 'grid',
+  gap: '16px',
+}
+
+const modalHeader = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+  gap: '12px',
+}
+
+const modalTitle = {
+  margin: '6px 0 0',
+  fontSize: '24px',
+  fontWeight: 950,
+  letterSpacing: '-0.04em',
+}
+
+const modalCloseButton = {
+  width: '42px',
+  height: '42px',
+  borderRadius: '14px',
+  border: '1px solid rgba(148, 163, 184, 0.35)',
+  background: 'rgba(15, 23, 42, 0.8)',
+  color: '#E2E8F0',
+  fontSize: '28px',
+  lineHeight: 1,
+  cursor: 'pointer',
+}
+
+const modalActions = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1.3fr',
+  gap: '10px',
+}
+
+const modalCancelButton = {
+  borderRadius: '14px',
+  border: '1px solid #475569',
+  background: 'transparent',
+  color: '#E2E8F0',
+  padding: '13px',
+  fontWeight: 900,
+  cursor: 'pointer',
+}
+
+const modalSubmitButton = {
+  border: 'none',
+  borderRadius: '14px',
+  background: '#22C55E',
+  color: '#052E16',
+  padding: '13px',
+  fontWeight: 950,
+  cursor: 'pointer',
 }
 
 const pageStyle = {
