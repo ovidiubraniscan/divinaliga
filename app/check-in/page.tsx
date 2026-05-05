@@ -375,7 +375,7 @@ export default function CheckInPage() {
       <NavBar />
 
       <main className="min-h-screen bg-[#070A0F] px-4 py-5 text-white">
-        <div className="mx-auto grid w-full max-w-[520px] gap-4">
+        <div className="mx-auto grid w-full max-w-130 gap-4">
           <header className="pt-2">
             <p className="text-xs font-black uppercase tracking-[0.28em] text-emerald-300">
               Divina Liga
