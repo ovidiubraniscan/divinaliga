@@ -91,13 +91,46 @@ export default function CheckInPage() {
   const [playerName, setPlayerName] = useState('')
   const [currentPlayerProfile, setCurrentPlayerProfile] = useState<PlayerProfile | null>(null)
   const [authUserEmail, setAuthUserEmail] = useState('')
+  const [authUserId, setAuthUserId] = useState<string | null>(null)
   const [profileLoading, setProfileLoading] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileMessage, setProfileMessage] = useState('')
+  const [profileNickname, setProfileNickname] = useState('')
+  const [profileNumber, setProfileNumber] = useState('')
+  const [profilePictureUrl, setProfilePictureUrl] = useState('')
+  const [profileFoot, setProfileFoot] = useState<'Right' | 'Left' | 'Both' | ''>('')
+  const [profileMainPosition, setProfileMainPosition] = useState('')
+  const [profileSecondaryPositions, setProfileSecondaryPositions] = useState<string[]>([])
   const [selectedPositions, setSelectedPositions] = useState<string[]>([])
   const [isCaptain, setIsCaptain] = useState(false)
   const [selectedRating, setSelectedRating] = useState(0)
 
   const [arrivals, setArrivals] = useState<Arrival[]>([])
   const [teams, setTeams] = useState<Team[]>([])
+
+  const fillProfileForm = (profile: PlayerProfile | null) => {
+    setProfileNickname(profile?.nickname || '')
+    setProfileNumber(profile?.player_number ? String(profile.player_number) : '')
+    setProfilePictureUrl(profile?.profile_picture_url || '')
+    setProfileFoot((profile?.preferred_foot as 'Right' | 'Left' | 'Both' | '') || '')
+    setProfileMainPosition(profile?.main_position || '')
+    setProfileSecondaryPositions(profile?.secondary_positions || [])
+  }
+
+  const getRatingTier = (rating: number) => {
+    if (rating >= 90) return 'Platinum'
+    if (rating >= 80) return 'Gold'
+    if (rating >= 70) return 'Silver'
+    return 'Bronze'
+  }
+
+  const toggleProfileSecondaryPosition = (position: string) => {
+    setProfileSecondaryPositions((current) =>
+      current.includes(position)
+        ? current.filter((item) => item !== position)
+        : [...current, position]
+    )
+  }
 
   const loadLoggedInPlayerProfile = async () => {
     setProfileLoading(true)
@@ -109,12 +142,15 @@ export default function CheckInPage() {
 
     if (userError || !user) {
       setAuthUserEmail('')
+      setAuthUserId(null)
       setCurrentPlayerProfile(null)
+      fillProfileForm(null)
       setProfileLoading(false)
       return null
     }
 
     setAuthUserEmail(user.email || '')
+    setAuthUserId(user.id)
 
     const { data, error } = await supabase
       .from('players')
@@ -132,8 +168,69 @@ export default function CheckInPage() {
       return null
     }
 
-    setCurrentPlayerProfile(data as PlayerProfile | null)
-    return data as PlayerProfile | null
+    const profile = data as PlayerProfile | null
+    setCurrentPlayerProfile(profile)
+    fillProfileForm(profile)
+    return profile
+  }
+
+
+  const savePlayerProfile = async () => {
+    setInvalidMessage('')
+    setProfileMessage('')
+
+    if (!authUserId) {
+      setProfileMessage('Please log in before creating a player profile.')
+      return
+    }
+
+    const nickname = profileNickname.trim()
+
+    if (!nickname) {
+      setProfileMessage('Please enter your nickname.')
+      return
+    }
+
+    const parsedNumber = profileNumber.trim() ? Number(profileNumber) : null
+
+    if (parsedNumber !== null && (!Number.isInteger(parsedNumber) || parsedNumber < 0 || parsedNumber > 999)) {
+      setProfileMessage('Player number must be a whole number between 0 and 999.')
+      return
+    }
+
+    const cleanSecondaries = profileSecondaryPositions.filter(
+      (position) => position && position !== profileMainPosition
+    )
+
+    setProfileSaving(true)
+
+    const payload = {
+      auth_user_id: authUserId,
+      nickname,
+      player_number: parsedNumber,
+      rating: currentPlayerProfile?.rating || 50,
+      profile_picture_url: profilePictureUrl.trim() || null,
+      preferred_foot: profileFoot || null,
+      main_position: profileMainPosition || null,
+      secondary_positions: cleanSecondaries,
+      games_played: currentPlayerProfile?.games_played || 0,
+      goals: currentPlayerProfile?.goals || 0,
+      assists: currentPlayerProfile?.assists || 0,
+    }
+
+    const { error } = currentPlayerProfile
+      ? await supabase.from('players').update(payload).eq('id', currentPlayerProfile.id)
+      : await supabase.from('players').insert(payload)
+
+    setProfileSaving(false)
+
+    if (error) {
+      setProfileMessage(error.message)
+      return
+    }
+
+    setProfileMessage('Profile saved. Your check-in will now use this card automatically.')
+    await loadLoggedInPlayerProfile()
   }
 
   const loadArrivals = async () => {
@@ -379,7 +476,7 @@ const validateTicket = async (ticket: string) => {
   }
 
   if (!currentPlayerProfile && !selectedRating) {
-    alert('Please select a rating from 1 to 10.')
+    alert('Please create/login with a player profile or select a guest rating.')
     return
   }
 
@@ -559,14 +656,117 @@ const hasGoalkeeper = (player: Arrival) => {
             </button>
 
             <div style={profileStatusBox}>
-              <p style={labelText}>Player profile</p>
-              <p style={profileStatusText}>
-                {profileLoading
-                  ? 'Checking profile...'
-                  : currentPlayerProfile
-                    ? `Signed in as ${currentPlayerProfile.nickname}${authUserEmail ? ` (${authUserEmail})` : ''}`
-                    : 'Not signed in. Guest check-in will ask for name and rating.'}
-              </p>
+              <div style={sectionHeader}>
+                <div>
+                  <p style={labelText}>Player profile</p>
+                  <p style={profileStatusText}>
+                    {profileLoading
+                      ? 'Checking profile...'
+                      : authUserEmail
+                        ? currentPlayerProfile
+                          ? `Signed in as ${currentPlayerProfile.nickname}${authUserEmail ? ` (${authUserEmail})` : ''}`
+                          : `Signed in as ${authUserEmail}. Create your player card below.`
+                        : 'Not signed in. Guest check-in will still work, but profile cards need login.'}
+                  </p>
+                </div>
+
+                {currentPlayerProfile && (
+                  <p style={ratingPill}>
+                    {currentPlayerProfile.rating}/99 · {getRatingTier(currentPlayerProfile.rating)}
+                  </p>
+                )}
+              </div>
+
+              {authUserEmail && (
+                <div style={profileFormGrid}>
+                  <label style={labelStyle}>
+                    <span style={labelText}>Nickname</span>
+                    <input
+                      value={profileNickname}
+                      onChange={(e) => setProfileNickname(e.target.value)}
+                      placeholder="Example: Ovi"
+                      style={inputStyle}
+                    />
+                  </label>
+
+                  <label style={labelStyle}>
+                    <span style={labelText}>Player number</span>
+                    <input
+                      value={profileNumber}
+                      onChange={(e) => setProfileNumber(e.target.value.replace(/\D/g, ''))}
+                      placeholder="10"
+                      inputMode="numeric"
+                      style={inputStyle}
+                    />
+                  </label>
+
+                  <label style={labelStyle}>
+                    <span style={labelText}>Profile picture URL</span>
+                    <input
+                      value={profilePictureUrl}
+                      onChange={(e) => setProfilePictureUrl(e.target.value)}
+                      placeholder="https://..."
+                      style={inputStyle}
+                    />
+                  </label>
+
+                  <label style={labelStyle}>
+                    <span style={labelText}>Preferred foot</span>
+                    <select
+                      value={profileFoot}
+                      onChange={(e) => setProfileFoot(e.target.value as 'Right' | 'Left' | 'Both' | '')}
+                      style={inputStyle}
+                    >
+                      <option value="">Select foot</option>
+                      <option value="Right">Right</option>
+                      <option value="Left">Left</option>
+                      <option value="Both">Both</option>
+                    </select>
+                  </label>
+
+                  <label style={labelStyle}>
+                    <span style={labelText}>Main position</span>
+                    <select
+                      value={profileMainPosition}
+                      onChange={(e) => setProfileMainPosition(e.target.value)}
+                      style={inputStyle}
+                    >
+                      <option value="">Select main position</option>
+                      {positions.map((position) => (
+                        <option key={position} value={position}>{position}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div>
+                    <p style={labelText}>Secondary positions</p>
+                    <div style={positionGrid}>
+                      {positions.map((position) => {
+                        const active = profileSecondaryPositions.includes(position)
+
+                        return (
+                          <button
+                            key={position}
+                            onClick={() => toggleProfileSecondaryPosition(position)}
+                            style={{
+                              ...positionButton,
+                              ...(active ? activePositionButton : {}),
+                            }}
+                          >
+                            {position.toUpperCase()}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <button onClick={savePlayerProfile} style={profileSaveButton} disabled={profileSaving}>
+                    {profileSaving ? 'SAVING...' : currentPlayerProfile ? 'UPDATE PLAYER CARD' : 'CREATE PLAYER CARD'}
+                  </button>
+
+                  {profileMessage && <p style={profileMessageStyle}>{profileMessage}</p>}
+                </div>
+              )}
             </div>
 
             <div style={manualTicketBox}>
@@ -809,7 +1009,7 @@ const hasGoalkeeper = (player: Arrival) => {
           <h3 style={teamName}>{teamStyle.name}</h3>
         </div>
 
-        <p style={teamStyle.badge}>Avg {average}/10</p>
+        <p style={teamStyle.badge}>Avg {average}/99</p>
       </div>
 
       <div style={{ display: 'grid', gap: '8px', marginTop: '14px' }}>
@@ -828,7 +1028,7 @@ const hasGoalkeeper = (player: Arrival) => {
                 </p>
               </div>
 
-              <p style={teamRatingPill}>{player.rating}/10</p>
+              <p style={teamRatingPill}>{player.rating}/99</p>
             </div>
           </div>
         ))}
@@ -860,6 +1060,32 @@ const profileStatusText = {
   fontSize: '13px',
   lineHeight: 1.45,
 }
+
+const profileFormGrid = {
+  marginTop: '14px',
+  display: 'grid',
+  gap: '12px',
+}
+
+const profileSaveButton = {
+  width: '100%',
+  border: 'none',
+  borderRadius: '14px',
+  background: '#FACC15',
+  color: '#422006',
+  padding: '13px',
+  fontWeight: 950,
+  cursor: 'pointer',
+}
+
+const profileMessageStyle = {
+  margin: 0,
+  color: '#BFDBFE',
+  fontSize: '13px',
+  fontWeight: 800,
+  lineHeight: 1.45,
+}
+
 
 const profilePreviewCard = {
   display: 'flex',
