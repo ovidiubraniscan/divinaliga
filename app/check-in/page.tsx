@@ -69,6 +69,7 @@ export default function CheckInPage() {
   const [selectedRating, setSelectedRating] = useState(0);
 
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
+  const [showAllArrivals, setShowAllArrivals] = useState(false);
   const [teams, setTeams] = useState<Team[]>([]);
 
   const [isAdmin, setIsAdmin] = useState(false);
@@ -597,6 +598,13 @@ export default function CheckInPage() {
     return player.positions.includes("Goalkeeper");
   };
 
+  const latestArrival = arrivals.length ? arrivals[arrivals.length - 1] : null;
+  const visibleArrivals = showAllArrivals
+    ? [...arrivals].reverse()
+    : latestArrival
+      ? [latestArrival]
+      : [];
+
   return (
     <>
       <NavBar />
@@ -817,7 +825,15 @@ export default function CheckInPage() {
 
           <section style={glassCard}>
             <div style={sectionHeader}>
-              <h2 style={sectionTitle}>Arrived Players</h2>
+              <div>
+                <h2 style={sectionTitle}>Arrived Players</h2>
+                {arrivals.length > 0 && (
+                  <p style={arrivalCountText}>
+                    {arrivals.length} checked in • showing {showAllArrivals ? "all players" : "latest player"}
+                  </p>
+                )}
+              </div>
+
               {isAdmin && (
                 <button onClick={openClearAllConfirm} style={clearButton}>
                   Clear
@@ -828,70 +844,83 @@ export default function CheckInPage() {
             {arrivals.length === 0 ? (
               <p style={{ color: "#94A3B8" }}>No players checked in yet.</p>
             ) : (
-              <div style={{ display: "grid", gap: "10px" }}>
-                {arrivals.map((player) => (
-                  <div key={player.ticket} style={arrivalCard}>
-                    <div style={arrivalTop}>
-                      <div>
-                        <p style={{ margin: 0, fontWeight: 900 }}>
-                          {player.name}{" "}
-                          {player.captain && (
-                            <span style={{ color: "#FACC15" }}>(Captain)</span>
-                          )}
-                        </p>
-                        <p
-                          style={{
-                            margin: "4px 0 0",
-                            color: "#94A3B8",
-                            fontSize: "12px",
-                          }}
-                        >
-                          {player.ticket}
-                        </p>
+              <>
+                <div style={{ display: "grid", gap: "10px", marginTop: "12px" }}>
+                  {visibleArrivals.map((player) => (
+                    <div key={player.ticket} style={arrivalCard}>
+                      <div style={arrivalTop}>
+                        <div>
+                          <p style={{ margin: 0, fontWeight: 900 }}>
+                            {player.name}{" "}
+                            {player.captain && (
+                              <span style={{ color: "#FACC15" }}>(Captain)</span>
+                            )}
+                          </p>
+                          <p
+                            style={{
+                              margin: "4px 0 0",
+                              color: "#94A3B8",
+                              fontSize: "12px",
+                            }}
+                          >
+                            {player.ticket}
+                          </p>
+                        </div>
+
+                        <p style={ratingPill}>{player.rating}/10</p>
                       </div>
 
-                      <p style={ratingPill}>{player.rating}/10</p>
+                      <p
+                        style={{
+                          margin: "10px 0 0",
+                          color: "#CBD5E1",
+                          fontSize: "13px",
+                        }}
+                      >
+                        {player.positions.join(", ") || "No position selected"}
+                      </p>
+
+                      <p
+                        style={{
+                          margin: "6px 0 0",
+                          color: "#64748B",
+                          fontSize: "12px",
+                        }}
+                      >
+                        Arrived: {player.arrivalTime}
+                      </p>
+                      {isAdmin && (
+                        <div style={adminPlayerActions}>
+                          <button
+                            onClick={() => openEditPlayerModal(player)}
+                            style={editPlayerButton}
+                          >
+                            Edit Player
+                          </button>
+
+                          <button
+                            onClick={() => openRemovePlayerConfirm(player)}
+                            style={removePlayerButton}
+                          >
+                            Remove Player
+                          </button>
+                        </div>
+                      )}
                     </div>
+                  ))}
+                </div>
 
-                    <p
-                      style={{
-                        margin: "10px 0 0",
-                        color: "#CBD5E1",
-                        fontSize: "13px",
-                      }}
-                    >
-                      {player.positions.join(", ") || "No position selected"}
-                    </p>
-
-                    <p
-                      style={{
-                        margin: "6px 0 0",
-                        color: "#64748B",
-                        fontSize: "12px",
-                      }}
-                    >
-                      Arrived: {player.arrivalTime}
-                    </p>
-                    {isAdmin && (
-                      <div style={adminPlayerActions}>
-                        <button
-                          onClick={() => openEditPlayerModal(player)}
-                          style={editPlayerButton}
-                        >
-                          Edit Player
-                        </button>
-
-                        <button
-                          onClick={() => openRemovePlayerConfirm(player)}
-                          style={removePlayerButton}
-                        >
-                          Remove Player
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+                {arrivals.length > 1 && (
+                  <button
+                    onClick={() => setShowAllArrivals(!showAllArrivals)}
+                    style={toggleArrivalsButton}
+                  >
+                    {showAllArrivals
+                      ? "Hide full arrivals list"
+                      : `Show all ${arrivals.length} arrived players`}
+                  </button>
+                )}
+              </>
             )}
           </section>
 
@@ -1554,6 +1583,27 @@ const clearButton = {
   padding: "8px 12px",
   fontSize: "12px",
   fontWeight: 800,
+  cursor: "pointer",
+};
+
+
+const arrivalCountText = {
+  margin: "5px 0 0",
+  color: "#94A3B8",
+  fontSize: "12px",
+  fontWeight: 700,
+};
+
+const toggleArrivalsButton = {
+  width: "100%",
+  marginTop: "12px",
+  borderRadius: "14px",
+  border: "1px solid rgba(148, 163, 184, 0.35)",
+  background: "rgba(15, 23, 42, 0.72)",
+  color: "#E2E8F0",
+  padding: "12px",
+  fontSize: "13px",
+  fontWeight: 900,
   cursor: "pointer",
 };
 
