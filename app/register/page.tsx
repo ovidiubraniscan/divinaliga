@@ -9,9 +9,26 @@ const FEET = ['Right', 'Left', 'Both'] as const
 
 type PreferredFoot = (typeof FEET)[number]
 
+type Player = {
+  id: string
+  username: string
+  nickname: string
+  player_number: number | null
+  rating: number
+  profile_picture_url: string | null
+  preferred_foot: PreferredFoot
+  main_position: string
+  secondary_positions: string[]
+  games_played: number
+  goals: number
+  assists: number
+  is_active?: boolean
+}
+
 export default function Register() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [username, setUsername] = useState('')
+  const [pin, setPin] = useState('')
+  const [confirmPin, setConfirmPin] = useState('')
   const [nickname, setNickname] = useState('')
   const [playerNumber, setPlayerNumber] = useState('')
   const [profilePictureUrl, setProfilePictureUrl] = useState('')
@@ -34,16 +51,28 @@ export default function Register() {
     setMessage('')
     setSuccess(false)
 
-    const cleanEmail = email.trim().toLowerCase()
+    const cleanUsername = username.trim().toLowerCase().replace(/\s+/g, '')
     const cleanNickname = nickname.trim()
+    const cleanPin = pin.trim()
+    const cleanConfirmPin = confirmPin.trim()
 
-    if (!cleanEmail) {
-      setMessage('Please enter your email address.')
+    if (!cleanUsername) {
+      setMessage('Please choose a username.')
       return
     }
 
-    if (password.length < 6) {
-      setMessage('Password must be at least 6 characters.')
+    if (!/^[a-z0-9._-]{3,20}$/.test(cleanUsername)) {
+      setMessage('Username must be 3-20 characters and can only use letters, numbers, dot, dash or underscore.')
+      return
+    }
+
+    if (!/^\d{4}$/.test(cleanPin)) {
+      setMessage('PIN must be exactly 4 numbers.')
+      return
+    }
+
+    if (cleanPin !== cleanConfirmPin) {
+      setMessage('PINs do not match.')
       return
     }
 
@@ -59,56 +88,62 @@ export default function Register() {
 
     setLoading(true)
 
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-      email: cleanEmail,
-      password,
-    })
+    const { data: existingPlayer, error: existingError } = await supabase
+      .from('players')
+      .select('id')
+      .eq('username', cleanUsername)
+      .maybeSingle()
 
-    if (signUpError) {
-      setMessage(signUpError.message)
+    if (existingError) {
+      setMessage(existingError.message)
       setLoading(false)
       return
     }
 
-    const userId = signUpData.user?.id
-
-    if (!userId) {
-      setMessage('Account created, but profile could not be linked yet. Please confirm your email and log in.')
+    if (existingPlayer) {
+      setMessage('This username is already taken. Please choose another username.')
       setLoading(false)
       return
     }
 
-    const { error: profileError } = await supabase.from('players').insert({
-      auth_user_id: userId,
-      nickname: cleanNickname,
-      player_number: playerNumber ? Number(playerNumber) : null,
-      rating: 50,
-      profile_picture_url: profilePictureUrl.trim() || null,
-      preferred_foot: preferredFoot,
-      main_position: mainPosition,
-      secondary_positions: secondaryPositions,
-      games_played: 0,
-      goals: 0,
-      assists: 0,
-    })
+    const { data, error } = await supabase
+      .from('players')
+      .insert({
+        username: cleanUsername,
+        pin_code: cleanPin,
+        nickname: cleanNickname,
+        player_number: playerNumber ? Number(playerNumber) : null,
+        rating: 50,
+        profile_picture_url: profilePictureUrl.trim() || null,
+        preferred_foot: preferredFoot,
+        main_position: mainPosition,
+        secondary_positions: secondaryPositions,
+        games_played: 0,
+        goals: 0,
+        assists: 0,
+        is_active: true,
+      })
+      .select(
+        'id, username, nickname, player_number, rating, profile_picture_url, preferred_foot, main_position, secondary_positions, games_played, goals, assists, is_active'
+      )
+      .single()
 
-    if (profileError) {
-      setMessage(profileError.message)
+    if (error) {
+      setMessage(error.message)
       setLoading(false)
       return
     }
+
+    const player = data as Player
+    localStorage.setItem('divina_player', JSON.stringify(player))
 
     setSuccess(true)
-    setMessage('Account and player profile created successfully. You can now log in and check in with your ticket.')
-    setEmail('')
-    setPassword('')
-    setNickname('')
-    setPlayerNumber('')
-    setProfilePictureUrl('')
-    setPreferredFoot('Right')
-    setMainPosition('')
-    setSecondaryPositions([])
+    setMessage('Player card created successfully. You are now logged in.')
     setLoading(false)
+
+    setTimeout(() => {
+      window.location.href = '/profile'
+    }, 700)
   }
 
   return (
@@ -118,30 +153,50 @@ export default function Register() {
       <div style={containerStyle}>
         <div style={headerCardStyle}>
           <p style={eyebrowStyle}>DIVINA LIGA</p>
-          <h1 style={titleStyle}>Create Player Profile</h1>
+          <h1 style={titleStyle}>Create Player Card</h1>
           <p style={subtitleStyle}>
-            Register once, then your player card will be used automatically when you scan a valid ticket.
+            Register with a username and 4-digit PIN. No email needed for players.
           </p>
         </div>
 
         <div style={formCardStyle}>
-          <label style={labelStyle}>Email</label>
+          <label style={labelStyle}>Username</label>
           <input
-            placeholder="you@example.com"
-            value={email}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setEmail(event.target.value)}
+            placeholder="e.g. ovi10"
+            value={username}
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+              setUsername(event.target.value.toLowerCase().replace(/\s+/g, ''))
+            }
             style={inputStyle}
-            type="email"
-            autoComplete="email"
+            type="text"
+            autoComplete="username"
           />
 
-          <label style={labelStyle}>Password</label>
+          <label style={labelStyle}>4-digit PIN</label>
           <input
-            placeholder="Minimum 6 characters"
-            value={password}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setPassword(event.target.value)}
+            placeholder="1234"
+            value={pin}
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+              setPin(event.target.value.replace(/\D/g, '').slice(0, 4))
+            }
             style={inputStyle}
             type="password"
+            inputMode="numeric"
+            maxLength={4}
+            autoComplete="new-password"
+          />
+
+          <label style={labelStyle}>Confirm PIN</label>
+          <input
+            placeholder="1234"
+            value={confirmPin}
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+              setConfirmPin(event.target.value.replace(/\D/g, '').slice(0, 4))
+            }
+            style={inputStyle}
+            type="password"
+            inputMode="numeric"
+            maxLength={4}
             autoComplete="new-password"
           />
 
@@ -157,7 +212,9 @@ export default function Register() {
           <input
             placeholder="e.g. 10"
             value={playerNumber}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => setPlayerNumber(event.target.value.replace(/\D/g, ''))}
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+              setPlayerNumber(event.target.value.replace(/\D/g, '').slice(0, 3))
+            }
             style={inputStyle}
             inputMode="numeric"
           />
@@ -219,13 +276,14 @@ export default function Register() {
             </div>
             <div style={{ flex: 1 }}>
               <p style={previewNameStyle}>{nickname || 'Nickname'}</p>
+              <p style={previewMetaStyle}>@{username || 'username'}</p>
               <p style={previewMetaStyle}>#{playerNumber || '--'} • {preferredFoot} Foot</p>
               <p style={previewMetaStyle}>{mainPosition || 'Main position'}</p>
             </div>
           </div>
 
           <button onClick={handleRegister} style={loading ? disabledButtonStyle : buttonStyle} disabled={loading}>
-            {loading ? 'Creating Profile...' : 'Create Account & Player Card'}
+            {loading ? 'Creating Player Card...' : 'Create Player Card'}
           </button>
 
           {message && (
