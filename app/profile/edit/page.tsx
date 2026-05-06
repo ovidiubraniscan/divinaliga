@@ -1,9 +1,10 @@
 'use client'
 
-import { ChangeEvent, useEffect, useState } from 'react'
+import { ChangeEvent, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import NavBar from '@/components/NavBar'
 import { supabase } from '@/lib/supabase'
+import { Html5Qrcode } from 'html5-qrcode'
 
 type PreferredFoot = 'Right' | 'Left' | 'Both' | ''
 
@@ -25,15 +26,38 @@ type PlayerProfile = {
   created_at?: string
 }
 
+type PlayerTicket = {
+  id: string
+  player_id: string
+  ticket_code: string
+  is_used: boolean
+  used_at: string | null
+  created_at: string
+}
+
+type RatingHistory = {
+  id: string
+  player_id: string
+  old_rating: number | null
+  new_rating: number
+  reason: string | null
+  match_label: string | null
+  created_at: string
+}
+
 const POSITION_OPTIONS = ['Goalkeeper', 'Defender', 'Midfield', 'Attacker']
 
 export default function EditProfile() {
   const router = useRouter()
+  const scannerRef = useRef<Html5Qrcode | null>(null)
 
   const [player, setPlayer] = useState<PlayerProfile | null>(null)
+  const [tickets, setTickets] = useState<PlayerTicket[]>([])
+  const [ratingHistory, setRatingHistory] = useState<RatingHistory[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [scanningTicket, setScanningTicket] = useState(false)
   const [message, setMessage] = useState('')
 
   const [nickname, setNickname] = useState('')
@@ -42,65 +66,95 @@ export default function EditProfile() {
   const [preferredFoot, setPreferredFoot] = useState<PreferredFoot>('')
   const [mainPosition, setMainPosition] = useState('')
   const [secondaryPositions, setSecondaryPositions] = useState<string[]>([])
+  const [manualTicketCode, setManualTicketCode] = useState('')
 
   useEffect(() => {
-    const loadProfile = async () => {
-      setMessage('')
+    loadProfile()
 
-      const savedPlayer = localStorage.getItem('divina_player')
+    return () => {
+      stopTicketScanner()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-      if (!savedPlayer) {
-        router.push('/login')
-        return
-      }
+  const loadProfile = async () => {
+    setMessage('')
 
-      let parsedPlayer: PlayerProfile
+    const savedPlayer = localStorage.getItem('divina_player')
 
-      try {
-        parsedPlayer = JSON.parse(savedPlayer) as PlayerProfile
-      } catch {
-        localStorage.removeItem('divina_player')
-        router.push('/login')
-        return
-      }
-
-      const { data, error } = await supabase
-        .from('players')
-        .select(
-          'id, username, nickname, player_number, rating, profile_picture_url, preferred_foot, main_position, secondary_positions, games_played, goals, assists, is_active, created_at'
-        )
-        .eq('id', parsedPlayer.id)
-        .maybeSingle()
-
-      if (error) {
-        setMessage(error.message)
-        setLoading(false)
-        return
-      }
-
-      if (!data) {
-        localStorage.removeItem('divina_player')
-        router.push('/login')
-        return
-      }
-
-      const profile = data as PlayerProfile
-
-      setPlayer(profile)
-      setNickname(profile.nickname || '')
-      setPlayerNumber(profile.player_number ? String(profile.player_number) : '')
-      setProfileImageUrl(profile.profile_picture_url || '')
-      setPreferredFoot(profile.preferred_foot || '')
-      setMainPosition(profile.main_position || '')
-      setSecondaryPositions(profile.secondary_positions || [])
-      localStorage.setItem('divina_player', JSON.stringify(profile))
-      setLoading(false)
+    if (!savedPlayer) {
+      router.push('/login')
+      return
     }
 
-    loadProfile()
-  }, [router])
+    let parsedPlayer: PlayerProfile
+
+    try {
+      parsedPlayer = JSON.parse(savedPlayer) as PlayerProfile
+    } catch {
+      localStorage.removeItem('divina_player')
+      router.push('/login')
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('players')
+      .select(
+        'id, username, nickname, player_number, rating, profile_picture_url, preferred_foot, main_position, secondary_positions, games_played, goals, assists, is_active, created_at'
+      )
+      .eq('id', parsedPlayer.id)
+      .maybeSingle()
+
+    if (error) {
+      setMessage(error.message)
+      setLoading(false)
+      return
+    }
+
+    if (!data) {
+      localStorage.removeItem('divina_player')
+      router.push('/login')
+      return
+    }
+
+    const profile = data as PlayerProfile
+
+    setPlayer(profile)
+    setNickname(profile.nickname || '')
+    setPlayerNumber(profile.player_number ? String(profile.player_number) : '')
+    setProfileImageUrl(profile.profile_picture_url || '')
+    setPreferredFoot(profile.preferred_foot || '')
+    setMainPosition(profile.main_position || '')
+    setSecondaryPositions(profile.secondary_positions || [])
+    localStorage.setItem('divina_player', JSON.stringify(profile))
+
+    await Promise.all([loadTickets(profile.id), loadRatingHistory(profile.id)])
+    setLoading(false)
+  }
+
+  const loadTickets = async (playerId: string) => {
+    const { data, error } = await supabase
+      .from('player_tickets')
+      .select('id, player_id, ticket_code, is_used, used_at, created_at')
+      .eq('player_id', playerId)
+      .order('created_at', { ascending: false })
+
+    if (!error && data) setTickets(data as PlayerTicket[])
+  }
+
+  const loadRatingHistory = async (playerId: string) => {
+    const { data, error } = await supabase
+      .from('rating_history')
+      .select('id, player_id, old_rating, new_rating, reason, match_label, created_at')
+      .eq('player_id', playerId)
+      .order('created_at', { ascending: false })
+      .limit(10)
+
+    if (!error && data) setRatingHistory(data as RatingHistory[])
+  }
 
   const ratingTier = getRatingTier(player?.rating || 50)
+  const latestAvailableTicket = tickets.find((ticket) => !ticket.is_used)
 
   const handleImageUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     if (!player) return
@@ -108,16 +162,23 @@ export default function EditProfile() {
     const file = event.target.files?.[0]
     if (!file) return
 
+    const allowedTypes = ['image/png', 'image/webp', 'image/jpeg', 'image/jpg']
+
+    if (!allowedTypes.includes(file.type)) {
+      setMessage('Please upload a PNG, WEBP, or JPG image.')
+      return
+    }
+
     setUploading(true)
     setMessage('')
 
-    const fileExt = file.name.split('.').pop() || 'jpg'
+    const fileExt = file.name.split('.').pop() || 'png'
     const cleanUsername = player.username.replace(/[^a-zA-Z0-9_-]/g, '')
     const filePath = `${player.id}/${cleanUsername}-${Date.now()}.${fileExt}`
 
     const { error: uploadError } = await supabase.storage
       .from('profile-images')
-      .upload(filePath, file, { upsert: true })
+      .upload(filePath, file, { upsert: true, contentType: file.type })
 
     if (uploadError) {
       setMessage(uploadError.message)
@@ -129,7 +190,7 @@ export default function EditProfile() {
 
     setProfileImageUrl(data.publicUrl)
     setUploading(false)
-    setMessage('Image uploaded. Press Save Profile to keep it.')
+    setMessage('Image uploaded. Press Save Profile to keep it. PNG or WEBP keeps transparent background if the image already has one.')
   }
 
   const toggleSecondaryPosition = (position: string) => {
@@ -208,8 +269,120 @@ export default function EditProfile() {
     setSaving(false)
   }
 
+  const startTicketScanner = async () => {
+    if (!player) return
+
+    setMessage('')
+    setScanningTicket(true)
+
+    const scanner = new Html5Qrcode('ticket-reader')
+    scannerRef.current = scanner
+
+    try {
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        async (decodedText: string) => {
+          await stopTicketScanner()
+          await saveTicketCode(decodedText)
+        },
+        undefined
+      )
+    } catch (error) {
+      setScanningTicket(false)
+      setMessage('Camera could not start. Check camera permissions and use HTTPS or localhost.')
+    }
+  }
+
+  const stopTicketScanner = async () => {
+    const scanner = scannerRef.current
+
+    if (scanner) {
+      try {
+        const state = scanner.getState?.()
+        if (state === 2) await scanner.stop()
+        await scanner.clear()
+      } catch {
+        // Ignore scanner cleanup errors.
+      }
+    }
+
+    scannerRef.current = null
+    setScanningTicket(false)
+  }
+
+  const saveManualTicket = async () => {
+    await saveTicketCode(manualTicketCode)
+  }
+
+  const saveTicketCode = async (rawCode: string) => {
+    if (!player) return
+
+    const ticketCode = rawCode.trim().toUpperCase()
+
+    if (!ticketCode) {
+      setMessage('Ticket code is empty.')
+      return
+    }
+
+    const existsLocally = tickets.some((ticket) => ticket.ticket_code === ticketCode)
+    if (existsLocally) {
+      localStorage.setItem('divina_pending_ticket', ticketCode)
+      setMessage('Ticket already saved. It is ready for check-in.')
+      setManualTicketCode('')
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('player_tickets')
+      .insert({
+        player_id: player.id,
+        ticket_code: ticketCode,
+        is_used: false,
+      })
+      .select('id, player_id, ticket_code, is_used, used_at, created_at')
+      .maybeSingle()
+
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+
+    if (!data) {
+      setMessage('Ticket could not be saved.')
+      return
+    }
+
+    const savedTicket = data as PlayerTicket
+    setTickets((current) => [savedTicket, ...current])
+    localStorage.setItem('divina_pending_ticket', savedTicket.ticket_code)
+    setManualTicketCode('')
+    setMessage('Ticket saved and ready to use on check-in.')
+  }
+
+  const useTicketForCheckIn = (ticketCode: string) => {
+    localStorage.setItem('divina_pending_ticket', ticketCode)
+    setMessage('Ticket selected. Go to check-in and it will be ready to use.')
+  }
+
+  const removeTicket = async (ticketId: string) => {
+    const { error } = await supabase
+      .from('player_tickets')
+      .delete()
+      .eq('id', ticketId)
+
+    if (error) {
+      setMessage(error.message)
+      return
+    }
+
+    setTickets((current) => current.filter((ticket) => ticket.id !== ticketId))
+    setMessage('Ticket removed.')
+  }
+
   const logout = () => {
     localStorage.removeItem('divina_player')
+    localStorage.removeItem('divina_pending_ticket')
     router.push('/login')
   }
 
@@ -223,9 +396,9 @@ export default function EditProfile() {
             <p className="text-xs font-black uppercase tracking-[0.35em] text-orange-400">
               Divina Liga
             </p>
-            <h1 className="text-3xl font-black">Edit Player Profile</h1>
+            <h1 className="text-3xl font-black">Player Profile</h1>
             <p className="text-sm text-zinc-400">
-              Update your player card details used for check-in and match day teams.
+              Edit your card, save tickets, and track your match progress.
             </p>
           </header>
 
@@ -257,10 +430,10 @@ export default function EditProfile() {
                     <img
                       src={profileImageUrl}
                       alt="Profile"
-                      className="h-32 w-32 rounded-full border-4 border-white/30 object-cover shadow-xl"
+                      className="h-36 w-36 rounded-full border-4 border-white/30 bg-black/20 object-cover shadow-xl"
                     />
                   ) : (
-                    <div className="flex h-32 w-32 items-center justify-center rounded-full border-4 border-white/20 bg-black/30 text-5xl">
+                    <div className="flex h-36 w-36 items-center justify-center rounded-full border-4 border-white/20 bg-black/30 text-5xl">
                       ⚽
                     </div>
                   )}
@@ -275,10 +448,16 @@ export default function EditProfile() {
                 </div>
               </section>
 
+              <section className="grid grid-cols-3 gap-2">
+                <StatCard label="Matches" value={player.games_played} />
+                <StatCard label="Goals" value={player.goals} />
+                <StatCard label="Assists" value={player.assists} />
+              </section>
+
               <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 shadow-xl">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-xl font-black">Profile Details</h2>
+                    <h2 className="text-xl font-black">Edit Details</h2>
                     <p className="text-xs text-zinc-400">Username cannot be changed.</p>
                   </div>
                   <button
@@ -316,13 +495,16 @@ export default function EditProfile() {
                 </label>
 
                 <label className="mb-3 block">
-                  <span className="mb-1 block text-xs font-black uppercase tracking-widest text-zinc-400">Profile Picture</span>
+                  <span className="mb-1 block text-xs font-black uppercase tracking-widest text-zinc-400">Portrait Profile Picture</span>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/png,image/webp,image/jpeg"
                     onChange={handleImageUpload}
                     className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-zinc-300"
                   />
+                  <span className="mt-2 block text-xs text-zinc-500">
+                    Upload PNG or WEBP if you want transparent background preserved.
+                  </span>
                 </label>
 
                 <label className="mb-3 block">
@@ -393,18 +575,147 @@ export default function EditProfile() {
                 >
                   {saving ? 'Saving...' : uploading ? 'Uploading...' : 'Save Profile'}
                 </button>
+              </section>
 
-                {message && (
-                  <p className={`mt-4 rounded-2xl p-3 text-sm font-bold ${message.includes('successfully') || message.includes('uploaded') || message.includes('Image uploaded') ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'}`}>
-                    {message}
+              <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 shadow-xl">
+                <div className="mb-4">
+                  <h2 className="text-xl font-black">Saved Tickets</h2>
+                  <p className="text-xs text-zinc-400">
+                    Scan a ticket here once, then use it on the check-in page without scanning again.
                   </p>
+                </div>
+
+                {latestAvailableTicket && (
+                  <div className="mb-4 rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4">
+                    <p className="text-xs font-black uppercase tracking-widest text-emerald-300">Ready for check-in</p>
+                    <p className="mt-1 text-2xl font-black">{latestAvailableTicket.ticket_code}</p>
+                    <button
+                      onClick={() => useTicketForCheckIn(latestAvailableTicket.ticket_code)}
+                      className="mt-3 w-full rounded-xl bg-emerald-400 px-4 py-3 text-sm font-black text-emerald-950"
+                    >
+                      Use This Ticket
+                    </button>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <button
+                    onClick={scanningTicket ? stopTicketScanner : startTicketScanner}
+                    className="w-full rounded-2xl bg-sky-500 px-5 py-4 text-lg font-black text-sky-950 shadow-lg"
+                  >
+                    {scanningTicket ? 'Stop Scanner' : 'Scan Ticket QR'}
+                  </button>
+
+                  {scanningTicket && (
+                    <div id="ticket-reader" className="overflow-hidden rounded-3xl bg-black p-2" />
+                  )}
+
+                  <div className="flex gap-2">
+                    <input
+                      value={manualTicketCode}
+                      onChange={(event) => setManualTicketCode(event.target.value)}
+                      className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 outline-none focus:border-orange-400"
+                      placeholder="Or type ticket code"
+                    />
+                    <button
+                      onClick={saveManualTicket}
+                      className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-black"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {tickets.length === 0 ? (
+                    <p className="rounded-2xl bg-black/30 p-4 text-sm text-zinc-400">No saved tickets yet.</p>
+                  ) : (
+                    tickets.map((ticket) => (
+                      <div key={ticket.id} className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-black">{ticket.ticket_code}</p>
+                            <p className="text-xs text-zinc-500">Added {formatDate(ticket.created_at)}</p>
+                            {ticket.is_used && <p className="mt-1 text-xs font-bold text-red-300">Used {ticket.used_at ? formatDate(ticket.used_at) : ''}</p>}
+                          </div>
+                          <span className={`rounded-full px-2 py-1 text-xs font-black ${ticket.is_used ? 'bg-red-500/10 text-red-300' : 'bg-emerald-500/10 text-emerald-300'}`}>
+                            {ticket.is_used ? 'USED' : 'READY'}
+                          </span>
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <button
+                            onClick={() => useTicketForCheckIn(ticket.ticket_code)}
+                            disabled={ticket.is_used}
+                            className="rounded-xl border border-emerald-400/30 px-3 py-2 text-xs font-black text-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            Use
+                          </button>
+                          <button
+                            onClick={() => removeTicket(ticket.id)}
+                            className="rounded-xl border border-red-500/30 px-3 py-2 text-xs font-black text-red-300"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 shadow-xl">
+                <h2 className="text-xl font-black">Rating History</h2>
+                <p className="mb-4 text-xs text-zinc-400">Track how your score changes after voting sessions and matches.</p>
+
+                {ratingHistory.length === 0 ? (
+                  <p className="rounded-2xl bg-black/30 p-4 text-sm text-zinc-400">
+                    No rating changes yet. Everyone starts at 50.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {ratingHistory.map((item) => {
+                      const direction = item.old_rating === null ? 'start' : item.new_rating > item.old_rating ? 'up' : item.new_rating < item.old_rating ? 'down' : 'same'
+                      return (
+                        <div key={item.id} className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="font-black">
+                                {item.old_rating ?? '--'} → {item.new_rating}
+                              </p>
+                              <p className="text-xs text-zinc-500">{item.match_label || 'Rating update'} · {formatDate(item.created_at)}</p>
+                            </div>
+                            <span className={`rounded-full px-2 py-1 text-xs font-black ${direction === 'up' ? 'bg-emerald-500/10 text-emerald-300' : direction === 'down' ? 'bg-red-500/10 text-red-300' : 'bg-zinc-500/10 text-zinc-300'}`}>
+                              {direction === 'up' ? 'UP' : direction === 'down' ? 'DOWN' : 'SET'}
+                            </span>
+                          </div>
+                          {item.reason && <p className="mt-2 text-sm text-zinc-300">{item.reason}</p>}
+                        </div>
+                      )
+                    })}
+                  </div>
                 )}
               </section>
+
+              {message && (
+                <p className={`rounded-2xl p-3 text-sm font-bold ${isPositiveMessage(message) ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'}`}>
+                  {message}
+                </p>
+              )}
             </>
           )}
         </div>
       </main>
     </>
+  )
+}
+
+function StatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 text-center">
+      <p className="text-2xl font-black text-white">{value}</p>
+      <p className="mt-1 text-xs font-black uppercase tracking-widest text-zinc-500">{label}</p>
+    </div>
   )
 }
 
@@ -420,4 +731,18 @@ function tierCardClass(tier: string) {
   if (tier === 'Gold') return 'border-yellow-300/70 bg-gradient-to-br from-yellow-300 via-amber-500 to-orange-700 text-zinc-950'
   if (tier === 'Silver') return 'border-zinc-200/60 bg-gradient-to-br from-zinc-200 via-zinc-400 to-zinc-700 text-zinc-950'
   return 'border-orange-300/60 bg-gradient-to-br from-orange-900 via-amber-700 to-stone-950 text-white'
+}
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function isPositiveMessage(value: string) {
+  const positiveWords = ['successfully', 'uploaded', 'saved', 'ready', 'selected', 'removed']
+  return positiveWords.some((word) => value.toLowerCase().includes(word))
 }
