@@ -359,7 +359,7 @@ const validateTicket = async (ticket: string) => {
     const defaultPositions = [
       profile.main_position,
       ...(profile.secondary_positions || []),
-    ].filter((item): item is string => Boolean(item) && positions.includes(item))
+    ].filter((item): item is string => typeof item === 'string' && positions.includes(item))
 
     if (defaultPositions.length) {
       setSelectedPositions([...new Set(defaultPositions)])
