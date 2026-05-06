@@ -510,6 +510,11 @@ export default function CheckInPage() {
   };
 
   const randomizeTeams = (teamCount: number) => {
+    if (!isAdmin) {
+      setInvalidMessage("Admin login required to create teams.");
+      return;
+    }
+
     if (arrivals.length < teamCount) {
       alert(`You need at least ${teamCount} checked-in players.`);
       return;
@@ -893,15 +898,23 @@ export default function CheckInPage() {
           <section style={glassCard}>
             <h2 style={sectionTitle}>Create Teams</h2>
 
-            <div style={teamButtonsGrid}>
-              <button onClick={() => randomizeTeams(2)} style={random2Button}>
-                CREATE 2 TEAMS (RED & BLUE)
-              </button>
+            {isAdmin && (
+              <div style={teamButtonsGrid}>
+                <button onClick={() => randomizeTeams(2)} style={random2Button}>
+                  CREATE 2 TEAMS (RED & BLUE)
+                </button>
 
-              <button onClick={() => randomizeTeams(3)} style={random3Button}>
-                CREATE 3 TEAMS
-              </button>
-            </div>
+                <button onClick={() => randomizeTeams(3)} style={random3Button}>
+                  CREATE 3 TEAMS
+                </button>
+              </div>
+            )}
+
+            {!isAdmin && teams.length === 0 && (
+              <p style={{ margin: "10px 0 0", color: "#94A3B8", fontSize: "13px" }}>
+                Teams will appear here after an admin creates them.
+              </p>
+            )}
 
             {teams.length > 0 && (
               <div style={{ display: "grid", gap: "12px", marginTop: "14px" }}>
