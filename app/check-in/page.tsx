@@ -108,6 +108,14 @@ export default function CheckInPage() {
   const [arrivals, setArrivals] = useState<Arrival[]>([])
   const [teams, setTeams] = useState<Team[]>([])
 
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [showAdminPanel, setShowAdminPanel] = useState(false)
+  const [adminEmail, setAdminEmail] = useState('')
+  const [adminPassword, setAdminPassword] = useState('')
+  const [adminMessage, setAdminMessage] = useState('')
+  const [pendingRemovePlayer, setPendingRemovePlayer] = useState<Arrival | null>(null)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+
   const fillProfileForm = (profile: PlayerProfile | null) => {
     setProfileNickname(profile?.nickname || '')
     setProfileNumber(profile?.player_number ? String(profile.player_number) : '')
@@ -115,6 +123,81 @@ export default function CheckInPage() {
     setProfileFoot((profile?.preferred_foot as 'Right' | 'Left' | 'Both' | '') || '')
     setProfileMainPosition(profile?.main_position || '')
     setProfileSecondaryPositions(profile?.secondary_positions || [])
+  }
+
+  const checkAdminStatus = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      setIsAdmin(false)
+      return false
+    }
+
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('is_admin')
+
+    if (!rpcError) {
+      const admin = Boolean(rpcResult)
+      setIsAdmin(admin)
+      return admin
+    }
+
+    const { data, error } = await supabase
+      .from('admins')
+      .select('user_id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (error) {
+      setIsAdmin(false)
+      return false
+    }
+
+    const admin = !!data
+    setIsAdmin(admin)
+    return admin
+  }
+
+  const adminLogin = async () => {
+    setAdminMessage('')
+    setInvalidMessage('')
+
+    if (!adminEmail.trim() || !adminPassword) {
+      setAdminMessage('Enter admin email and password.')
+      return
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: adminEmail.trim(),
+      password: adminPassword,
+    })
+
+    if (error) {
+      setAdminMessage(error.message)
+      return
+    }
+
+    const admin = await checkAdminStatus()
+
+    if (!admin) {
+      setAdminMessage('Signed in, but this account is not in the admins table.')
+      return
+    }
+
+    setAdminPassword('')
+    setShowAdminPanel(false)
+    setAdminMessage('Admin mode active.')
+    await loadLoggedInPlayerProfile()
+  }
+
+  const adminLogout = async () => {
+    await supabase.auth.signOut()
+    setIsAdmin(false)
+    setAdminEmail('')
+    setAdminPassword('')
+    setAdminMessage('Admin mode off.')
+    await loadLoggedInPlayerProfile()
   }
 
   const getRatingTier = (rating: number) => {
@@ -288,9 +371,11 @@ export default function CheckInPage() {
 useEffect(() => {
   loadArrivals()
   loadLoggedInPlayerProfile()
+  checkAdminStatus()
 
   const { data: authListener } = supabase.auth.onAuthStateChange(() => {
     loadLoggedInPlayerProfile()
+    checkAdminStatus()
   })
 
   return () => {
@@ -499,14 +584,19 @@ const validateTicket = async (ticket: string) => {
 }
 
 const clearArrivals = async () => {
-  const pin = prompt('Enter admin PIN to clear all players:')
-
-  if (pin !== ADMIN_PIN) {
-    alert('Incorrect PIN.')
+  if (!isAdmin) {
+    setInvalidMessage('Admin login required to clear players.')
     return
   }
 
-  if (!confirm('Clear all checked-in players?')) return
+  setShowClearConfirm(true)
+}
+
+const confirmClearArrivals = async () => {
+  if (!isAdmin) {
+    setInvalidMessage('Admin login required to clear players.')
+    return
+  }
 
   const { error } = await supabase
     .from('check_ins')
@@ -518,31 +608,41 @@ const clearArrivals = async () => {
     return
   }
 
+  setShowClearConfirm(false)
   setArrivals([])
   setTeams([])
 }
-const clearSinglePlayer = async (ticketCode: string, playerName: string) => {
-  const pin = prompt(`Enter admin PIN to remove ${playerName}:`)
 
-  if (pin !== ADMIN_PIN) {
-    alert('Incorrect PIN.')
+const requestRemovePlayer = (player: Arrival) => {
+  if (!isAdmin) {
+    setInvalidMessage('Admin login required to remove players.')
     return
   }
 
-  if (!confirm(`Remove ${playerName} from check-in list?`)) return
+  setPendingRemovePlayer(player)
+}
+
+const confirmRemovePlayer = async () => {
+  if (!pendingRemovePlayer) return
+
+  if (!isAdmin) {
+    setInvalidMessage('Admin login required to remove players.')
+    return
+  }
 
   const { error } = await supabase
     .from('check_ins')
     .delete()
-    .eq('ticket_code', ticketCode)
+    .eq('ticket_code', pendingRemovePlayer.ticket)
 
   if (error) {
     setInvalidMessage(error.message)
     return
   }
 
-  const updatedArrivals = arrivals.filter((player) => player.ticket !== ticketCode)
+  const updatedArrivals = arrivals.filter((player) => player.ticket !== pendingRemovePlayer.ticket)
 
+  setPendingRemovePlayer(null)
   setArrivals(updatedArrivals)
   setTeams([])
 }
@@ -554,6 +654,11 @@ const clearSinglePlayer = async (ticketCode: string, playerName: string) => {
   }
 
   const randomizeTeams = (teamCount: number) => {
+    if (!isAdmin) {
+      setInvalidMessage('Admin login required to create teams.')
+      return
+    }
+
     if (arrivals.length < teamCount) {
       alert(`You need at least ${teamCount} checked-in players.`)
       return
@@ -640,6 +745,15 @@ const hasGoalkeeper = (player: Arrival) => {
     <>
       <NavBar />
 
+      <button
+        type="button"
+        onClick={() => setShowAdminPanel(!showAdminPanel)}
+        style={floatingAdminButton}
+        aria-label="Admin login"
+      >
+        {isAdmin ? '🔓' : '🔒'}
+      </button>
+
       <main style={pageStyle}>
         <div style={{ maxWidth: '430px', margin: '0 auto' }}>
           <header style={{ textAlign: 'center', marginBottom: '18px' }}>
@@ -649,6 +763,50 @@ const hasGoalkeeper = (player: Arrival) => {
               Scan a ticket or enter the ticket code manually, confirm the player, then create balanced teams.
             </p>
           </header>
+
+          <section style={adminCard}>
+            <button
+              onClick={() => setShowAdminPanel(!showAdminPanel)}
+              style={adminToggleButton}
+            >
+              {isAdmin ? '🔓 Admin Active' : '🔒 Admin'}
+            </button>
+
+            {showAdminPanel && (
+              <div style={adminPanel}>
+                {isAdmin ? (
+                  <>
+                    <p style={adminStatusText}>Admin controls are enabled.</p>
+                    <button onClick={adminLogout} style={adminLogoutButton}>
+                      LOG OUT ADMIN
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      value={adminEmail}
+                      onChange={(e) => setAdminEmail(e.target.value)}
+                      placeholder="Admin email"
+                      type="email"
+                      style={inputStyle}
+                    />
+                    <input
+                      value={adminPassword}
+                      onChange={(e) => setAdminPassword(e.target.value)}
+                      placeholder="Admin password"
+                      type="password"
+                      style={inputStyle}
+                    />
+                    <button onClick={adminLogin} style={adminLoginButton}>
+                      LOGIN AS ADMIN
+                    </button>
+                  </>
+                )}
+
+                {adminMessage && <p style={profileMessageStyle}>{adminMessage}</p>}
+              </div>
+            )}
+          </section>
 
           <section style={glassCard}>
             <button onClick={startScanner} style={startButton}>
@@ -924,9 +1082,11 @@ const hasGoalkeeper = (player: Arrival) => {
           <section style={glassCard}>
             <div style={sectionHeader}>
               <h2 style={sectionTitle}>Arrived Players</h2>
-              <button onClick={clearArrivals} style={clearButton}>
-                Clear
-              </button>
+              {isAdmin && (
+                <button onClick={clearArrivals} style={clearButton}>
+                  Clear
+                </button>
+              )}
             </div>
 
             {arrivals.length === 0 ? (
@@ -967,12 +1127,14 @@ const hasGoalkeeper = (player: Arrival) => {
                     <p style={{ margin: '6px 0 0', color: '#64748B', fontSize: '12px' }}>
                       Arrived: {player.arrivalTime}
                     </p>
-                    <button
-  onClick={() => clearSinglePlayer(player.ticket, player.name)}
-  style={removePlayerButton}
->
-  Remove Player
-</button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => requestRemovePlayer(player)}
+                        style={removePlayerButton}
+                      >
+                        Remove Player
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -982,15 +1144,19 @@ const hasGoalkeeper = (player: Arrival) => {
           <section style={glassCard}>
             <h2 style={sectionTitle}>Create Teams</h2>
 
-            <div style={teamButtonsGrid}>
-              <button onClick={() => randomizeTeams(2)} style={random2Button}>
-                CREATE 2 TEAMS (RED & BLUE)
-              </button>
+            {isAdmin ? (
+              <div style={teamButtonsGrid}>
+                <button onClick={() => randomizeTeams(2)} style={random2Button}>
+                  CREATE 2 TEAMS (RED & BLUE)
+                </button>
 
-              <button onClick={() => randomizeTeams(3)} style={random3Button}>
-                CREATE 3 TEAMS
-              </button>
-            </div>
+                <button onClick={() => randomizeTeams(3)} style={random3Button}>
+                  CREATE 3 TEAMS
+                </button>
+              </div>
+            ) : (
+              <p style={adminHintText}>Teams can only be created by an admin. Results remain visible to everyone.</p>
+            )}
 
             {teams.length > 0 && (
               <div style={{ display: 'grid', gap: '12px', marginTop: '14px' }}>
@@ -1041,10 +1207,189 @@ const hasGoalkeeper = (player: Arrival) => {
           </section>
         </div>
       </main>
+
+      {pendingRemovePlayer && (
+        <div style={modalOverlay}>
+          <div style={confirmModalCard}>
+            <h3 style={confirmModalTitle}>Remove player?</h3>
+            <p style={confirmModalText}>
+              Remove {pendingRemovePlayer.name} from the checked-in players list?
+            </p>
+            <div style={confirmModalActions}>
+              <button onClick={() => setPendingRemovePlayer(null)} style={modalCancelButton}>
+                No
+              </button>
+              <button onClick={confirmRemovePlayer} style={modalDangerButton}>
+                Yes, remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showClearConfirm && (
+        <div style={modalOverlay}>
+          <div style={confirmModalCard}>
+            <h3 style={confirmModalTitle}>Clear all players?</h3>
+            <p style={confirmModalText}>
+              This will remove everyone from the checked-in list for this match.
+            </p>
+            <div style={confirmModalActions}>
+              <button onClick={() => setShowClearConfirm(false)} style={modalCancelButton}>
+                No
+              </button>
+              <button onClick={confirmClearArrivals} style={modalDangerButton}>
+                Yes, clear all
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
 
+
+
+const floatingAdminButton = {
+  position: 'fixed' as const,
+  top: '14px',
+  right: '14px',
+  zIndex: 80,
+  width: '44px',
+  height: '44px',
+  borderRadius: '999px',
+  border: '1px solid rgba(148, 163, 184, 0.35)',
+  background: 'rgba(15, 23, 42, 0.95)',
+  color: '#E5E7EB',
+  fontSize: '18px',
+  cursor: 'pointer',
+  boxShadow: '0 18px 45px rgba(0,0,0,0.45)',
+}
+
+const modalOverlay = {
+  position: 'fixed' as const,
+  inset: 0,
+  zIndex: 100,
+  display: 'grid',
+  placeItems: 'center',
+  background: 'rgba(2, 6, 23, 0.78)',
+  backdropFilter: 'blur(10px)',
+  padding: '18px',
+}
+
+const confirmModalCard = {
+  width: '100%',
+  maxWidth: '360px',
+  borderRadius: '24px',
+  border: '1px solid rgba(255,255,255,0.1)',
+  background: '#0F172A',
+  padding: '18px',
+  boxShadow: '0 24px 70px rgba(0,0,0,0.55)',
+}
+
+const confirmModalTitle = {
+  margin: 0,
+  fontSize: '20px',
+  fontWeight: 950,
+  color: '#FFFFFF',
+}
+
+const confirmModalText = {
+  margin: '10px 0 0',
+  color: '#CBD5E1',
+  fontSize: '14px',
+  lineHeight: 1.45,
+}
+
+const confirmModalActions = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: '10px',
+  marginTop: '16px',
+}
+
+const modalCancelButton = {
+  border: '1px solid rgba(148, 163, 184, 0.35)',
+  borderRadius: '14px',
+  background: 'rgba(15, 23, 42, 0.9)',
+  color: '#E5E7EB',
+  padding: '12px',
+  fontWeight: 900,
+  cursor: 'pointer',
+}
+
+const modalDangerButton = {
+  border: 'none',
+  borderRadius: '14px',
+  background: '#F87171',
+  color: '#450A0A',
+  padding: '12px',
+  fontWeight: 950,
+  cursor: 'pointer',
+}
+
+const adminCard = {
+  background: 'rgba(17, 24, 39, 0.82)',
+  border: '1px solid rgba(255, 255, 255, 0.08)',
+  borderRadius: '24px',
+  padding: '10px',
+  boxShadow: '0 22px 60px rgba(0,0,0,0.35)',
+  marginBottom: '14px',
+}
+
+const adminToggleButton = {
+  width: '100%',
+  border: '1px solid rgba(148, 163, 184, 0.25)',
+  borderRadius: '14px',
+  background: 'rgba(15, 23, 42, 0.9)',
+  color: '#E5E7EB',
+  padding: '11px 14px',
+  fontWeight: 900,
+  cursor: 'pointer',
+}
+
+const adminPanel = {
+  marginTop: '10px',
+  display: 'grid',
+  gap: '10px',
+}
+
+const adminLoginButton = {
+  width: '100%',
+  border: 'none',
+  borderRadius: '14px',
+  background: '#38BDF8',
+  color: '#082F49',
+  padding: '12px',
+  fontWeight: 900,
+  cursor: 'pointer',
+}
+
+const adminLogoutButton = {
+  width: '100%',
+  border: '1px solid rgba(248, 113, 113, 0.45)',
+  borderRadius: '14px',
+  background: 'rgba(127, 29, 29, 0.35)',
+  color: '#FCA5A5',
+  padding: '12px',
+  fontWeight: 900,
+  cursor: 'pointer',
+}
+
+const adminStatusText = {
+  margin: 0,
+  color: '#86EFAC',
+  fontSize: '13px',
+  fontWeight: 800,
+}
+
+const adminHintText = {
+  margin: '10px 0 0',
+  color: '#94A3B8',
+  fontSize: '13px',
+  lineHeight: 1.45,
+}
 
 const profileStatusBox = {
   marginTop: '12px',
