@@ -5,6 +5,21 @@ import NavBar from "@/components/NavBar";
 import { Html5Qrcode } from "html5-qrcode";
 import { supabase } from "@/lib/supabase";
 
+type PlayerProfile = {
+  id: string;
+  auth_user_id: string | null;
+  nickname: string;
+  player_number: number | null;
+  rating: number;
+  profile_picture_url: string | null;
+  preferred_foot: "Right" | "Left" | "Both" | null;
+  main_position: string | null;
+  secondary_positions: string[] | null;
+  games_played: number;
+  goals: number;
+  assists: number;
+};
+
 type Arrival = {
   name: string;
   ticket: string;
@@ -12,6 +27,13 @@ type Arrival = {
   captain: boolean;
   rating: number;
   arrivalTime: string;
+  playerId?: string | null;
+  playerNumber?: number | null;
+  profilePictureUrl?: string | null;
+  preferredFoot?: "Right" | "Left" | "Both" | null;
+  gamesPlayed?: number;
+  goals?: number;
+  assists?: number;
 };
 
 type Team = {
@@ -19,39 +41,6 @@ type Team = {
   players: Arrival[];
   totalRating: number;
 };
-
-const validTickets = [
-  "TCK-839201",
-  "TCK-472915",
-  "TCK-193847",
-  "TCK-650284",
-  "TCK-908173",
-  "TCK-274659",
-  "TCK-561902",
-  "TCK-784320",
-  "TCK-129875",
-  "TCK-346781",
-  "TCK-902134",
-  "TCK-675489",
-  "TCK-218903",
-  "TCK-543210",
-  "TCK-889761",
-  "TCK-332198",
-  "TCK-771245",
-  "TCK-459872",
-  "TCK-610394",
-  "TCK-285617",
-  "TCK-947302",
-  "TCK-136580",
-  "TCK-864209",
-  "TCK-703418",
-  "TCK-592731",
-  "TCK-418659",
-  "TCK-256904",
-  "TCK-980143",
-  "TCK-374628",
-  "TCK-621759",
-];
 
 const positions = ["Goalkeeper", "Defender", "Midfield", "Attacker"];
 
@@ -63,10 +52,12 @@ export default function CheckInPage() {
   const [invalidMessage, setInvalidMessage] = useState("");
   const [manualTicketNumber, setManualTicketNumber] = useState("");
 
-  const [playerName, setPlayerName] = useState("");
+  const [playerProfile, setPlayerProfile] = useState<PlayerProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileMessage, setProfileMessage] = useState("");
+
   const [selectedPositions, setSelectedPositions] = useState<string[]>([]);
   const [isCaptain, setIsCaptain] = useState(false);
-  const [selectedRating, setSelectedRating] = useState(0);
 
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const [showAllArrivals, setShowAllArrivals] = useState(false);
@@ -88,7 +79,7 @@ export default function CheckInPage() {
   const [editName, setEditName] = useState("");
   const [editPositions, setEditPositions] = useState<string[]>([]);
   const [editCaptain, setEditCaptain] = useState(false);
-  const [editRating, setEditRating] = useState(0);
+  const [editRating, setEditRating] = useState(50);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const checkAdminStatus = async () => {
@@ -112,6 +103,48 @@ export default function CheckInPage() {
     setIsAdmin(Boolean(data));
   };
 
+  const loadLoggedInPlayerProfile = async () => {
+    setProfileLoading(true);
+    setProfileMessage("");
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      setPlayerProfile(null);
+      setProfileMessage("Log in or register before checking in. Your ticket will use your saved player card.");
+      setProfileLoading(false);
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from("players")
+      .select("*")
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      setPlayerProfile(null);
+      setProfileMessage(error.message);
+      setProfileLoading(false);
+      return null;
+    }
+
+    if (!data) {
+      setPlayerProfile(null);
+      setProfileMessage("No player profile found for this account. Please create your profile first.");
+      setProfileLoading(false);
+      return null;
+    }
+
+    const profile = data as PlayerProfile;
+    setPlayerProfile(profile);
+    setProfileLoading(false);
+    return profile;
+  };
+
   const adminLogin = async () => {
     setAdminMessage("");
     setAdminLoading(true);
@@ -128,6 +161,7 @@ export default function CheckInPage() {
     }
 
     await checkAdminStatus();
+    await loadLoggedInPlayerProfile();
     setAdminPassword("");
     setAdminPanelOpen(false);
     setAdminLoading(false);
@@ -136,17 +170,38 @@ export default function CheckInPage() {
   const adminLogout = async () => {
     await supabase.auth.signOut();
     setIsAdmin(false);
+    setPlayerProfile(null);
     setAdminEmail("");
     setAdminPassword("");
     setAdminPanelOpen(false);
-    setAdminMessage("Admin logged out.");
+    setAdminMessage("Logged out.");
+    setProfileMessage("Log in or register before checking in. Your ticket will use your saved player card.");
   };
 
   const loadArrivals = async () => {
     const { data, error } = await supabase
       .from("check_ins")
       .select(
-        "ticket_code, player_name, positions, captain, rating, arrival_time",
+        `
+        ticket_code,
+        player_name,
+        positions,
+        captain,
+        rating,
+        arrival_time,
+        player_id,
+        players (
+          id,
+          nickname,
+          player_number,
+          rating,
+          profile_picture_url,
+          preferred_foot,
+          games_played,
+          goals,
+          assists
+        )
+      `,
       )
       .order("arrival_time", { ascending: true });
 
@@ -155,14 +210,26 @@ export default function CheckInPage() {
       return;
     }
 
-    const formatted: Arrival[] = (data || []).map((row) => ({
-      name: row.player_name,
-      ticket: row.ticket_code,
-      positions: row.positions || [],
-      captain: row.captain,
-      rating: row.rating,
-      arrivalTime: new Date(row.arrival_time).toLocaleString(),
-    }));
+    const formatted: Arrival[] = (data || []).map((row: any) => {
+      const linkedPlayer = Array.isArray(row.players) ? row.players[0] : row.players;
+      const rating = Number(linkedPlayer?.rating ?? row.rating ?? 50);
+
+      return {
+        name: linkedPlayer?.nickname || row.player_name,
+        ticket: row.ticket_code,
+        positions: row.positions || [],
+        captain: Boolean(row.captain),
+        rating,
+        arrivalTime: new Date(row.arrival_time).toLocaleString(),
+        playerId: row.player_id || linkedPlayer?.id || null,
+        playerNumber: linkedPlayer?.player_number ?? null,
+        profilePictureUrl: linkedPlayer?.profile_picture_url ?? null,
+        preferredFoot: linkedPlayer?.preferred_foot ?? null,
+        gamesPlayed: linkedPlayer?.games_played ?? 0,
+        goals: linkedPlayer?.goals ?? 0,
+        assists: linkedPlayer?.assists ?? 0,
+      };
+    });
 
     setArrivals(formatted);
   };
@@ -170,9 +237,11 @@ export default function CheckInPage() {
   useEffect(() => {
     loadArrivals();
     checkAdminStatus();
+    loadLoggedInPlayerProfile();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
-      checkAdminStatus();
+    const { data: authListener } = supabase.auth.onAuthStateChange(async () => {
+      await checkAdminStatus();
+      await loadLoggedInPlayerProfile();
     });
 
     return () => {
@@ -181,20 +250,29 @@ export default function CheckInPage() {
     };
   }, []);
 
-  const saveArrivals = (updated: Arrival[]) => {
-    setArrivals(updated);
-  };
-
   const resetForm = () => {
     setCurrentTicket(null);
-    setPlayerName("");
     setSelectedPositions([]);
     setIsCaptain(false);
-    setSelectedRating(0);
+  };
+
+  const getDefaultPositionsFromProfile = (profile: PlayerProfile) => {
+    const defaults = [profile.main_position, ...(profile.secondary_positions || [])]
+      .filter(Boolean)
+      .filter((item, index, array) => array.indexOf(item) === index) as string[];
+
+    return defaults.length ? defaults : [];
   };
 
   const validateTicket = async (ticket: string) => {
     setInvalidMessage("");
+
+    const profile = playerProfile || (await loadLoggedInPlayerProfile());
+
+    if (!profile) {
+      setInvalidMessage("Please log in and create your player profile before checking in.");
+      return;
+    }
 
     const { data: ticketData, error: ticketError } = await supabase
       .from("tickets")
@@ -214,7 +292,7 @@ export default function CheckInPage() {
 
     const { data: existingCheckIn, error: checkInError } = await supabase
       .from("check_ins")
-      .select("ticket_code")
+      .select("ticket_code, player_name")
       .eq("ticket_code", ticket)
       .maybeSingle();
 
@@ -224,7 +302,9 @@ export default function CheckInPage() {
     }
 
     if (existingCheckIn) {
-      setInvalidMessage(`This ticket has already checked in: ${ticket}`);
+      setInvalidMessage(
+        `This ticket has already checked in${existingCheckIn.player_name ? ` by ${existingCheckIn.player_name}` : ""}: ${ticket}`,
+      );
       return;
     }
 
@@ -232,6 +312,7 @@ export default function CheckInPage() {
 
     resetForm();
     setCurrentTicket(ticket);
+    setSelectedPositions(getDefaultPositionsFromProfile(profile));
   };
 
   const startScanner = async () => {
@@ -256,7 +337,7 @@ export default function CheckInPage() {
             fps: 10,
             qrbox: { width: 250, height: 250 },
           },
-          async (decodedText) => {
+          async (decodedText: string) => {
             await handleScanSuccess(decodedText);
           },
           () => {},
@@ -315,24 +396,22 @@ export default function CheckInPage() {
 
   const togglePosition = (position: string) => {
     if (selectedPositions.includes(position)) {
-      setSelectedPositions(
-        selectedPositions.filter((item) => item !== position),
-      );
+      setSelectedPositions(selectedPositions.filter((item) => item !== position));
     } else {
       setSelectedPositions([...selectedPositions, position]);
     }
   };
 
   const handleArrived = async () => {
-    const name = playerName.trim();
-
     if (!currentTicket) {
       alert("Please scan or enter a valid ticket first.");
       return;
     }
 
-    if (!name) {
-      alert("Please insert the player's name.");
+    const profile = playerProfile || (await loadLoggedInPlayerProfile());
+
+    if (!profile) {
+      setInvalidMessage("Please log in and create your player profile before checking in.");
       return;
     }
 
@@ -341,17 +420,13 @@ export default function CheckInPage() {
       return;
     }
 
-    if (!selectedRating) {
-      alert("Please select a rating from 1 to 10.");
-      return;
-    }
-
     const { error } = await supabase.from("check_ins").insert({
       ticket_code: currentTicket,
-      player_name: name,
+      player_id: profile.id,
+      player_name: profile.nickname,
       positions: selectedPositions,
       captain: isCaptain,
-      rating: selectedRating,
+      rating: profile.rating,
     });
 
     if (error) {
@@ -407,7 +482,7 @@ export default function CheckInPage() {
     setEditName(player.name);
     setEditPositions(player.positions);
     setEditCaptain(player.captain);
-    setEditRating(player.rating);
+    setEditRating(player.rating || 50);
   };
 
   const closeEditPlayerModal = () => {
@@ -415,7 +490,7 @@ export default function CheckInPage() {
     setEditName("");
     setEditPositions([]);
     setEditCaptain(false);
-    setEditRating(0);
+    setEditRating(50);
   };
 
   const toggleEditPosition = (position: string) => {
@@ -441,8 +516,8 @@ export default function CheckInPage() {
       return;
     }
 
-    if (!editRating || editRating < 1 || editRating > 10) {
-      setInvalidMessage("Rating must be from 1 to 10.");
+    if (editRating < 50 || editRating > 99) {
+      setInvalidMessage("Rating must be from 50 to 99.");
       return;
     }
 
@@ -457,6 +532,13 @@ export default function CheckInPage() {
         rating: editRating,
       })
       .eq("ticket_code", editingPlayer.ticket);
+
+    if (!error && editingPlayer.playerId) {
+      await supabase
+        .from("players")
+        .update({ nickname: cleanedName, rating: editRating })
+        .eq("id", editingPlayer.playerId);
+    }
 
     setIsSavingEdit(false);
 
@@ -503,11 +585,6 @@ export default function CheckInPage() {
     setPlayerToRemove(null);
     setArrivals(updatedArrivals);
     setTeams([]);
-  };
-
-  const ratingColour = (value: number) => {
-    const hue = Math.round(((value - 1) * 120) / 9);
-    return `hsl(${hue}, 90%, 52%)`;
   };
 
   const randomizeTeams = (teamCount: number) => {
@@ -567,6 +644,7 @@ export default function CheckInPage() {
 
     return sizePenalty + ratingPenalty + positionPenalty + goalkeeperPenalty;
   };
+
   const getTeamStyle = (index: number) => {
     if (index === 0) {
       return {
@@ -615,8 +693,7 @@ export default function CheckInPage() {
             <p style={eyebrowStyle}>Divina Liga</p>
             <h1 style={titleStyle}>Match Check-In</h1>
             <p style={subtitleStyle}>
-              Scan a ticket or enter the ticket code manually, confirm the
-              player, then create balanced teams.
+              Log in, scan a valid ticket, confirm today&apos;s position, then create balanced teams.
             </p>
           </header>
 
@@ -640,29 +717,26 @@ export default function CheckInPage() {
                   <h2 style={sectionTitle}>Admin Access</h2>
                   <p style={adminStatusText}>
                     {isAdmin
-                      ? "Logged in as admin. Edit, remove, and clear controls are active."
-                      : "Log in to unlock edit, remove, and clear controls."}
+                      ? "Logged in as admin. Edit, remove, clear, and team controls are active."
+                      : "Log in to unlock edit, remove, clear, and create-team controls."}
                   </p>
                 </div>
 
-                <button
-                  onClick={() => setAdminPanelOpen(false)}
-                  style={modalCloseButton}
-                >
+                <button onClick={() => setAdminPanelOpen(false)} style={modalCloseButton}>
                   ×
                 </button>
               </div>
 
               {isAdmin ? (
                 <button onClick={adminLogout} style={adminLogoutButton}>
-                  Logout Admin
+                  Logout
                 </button>
               ) : (
                 <div style={adminLoginBox}>
                   <input
                     value={adminEmail}
                     onChange={(e) => setAdminEmail(e.target.value)}
-                    placeholder="Admin email"
+                    placeholder="Email"
                     type="email"
                     style={inputStyle}
                   />
@@ -673,17 +747,13 @@ export default function CheckInPage() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter") adminLogin();
                     }}
-                    placeholder="Admin password"
+                    placeholder="Password"
                     type="password"
                     style={inputStyle}
                   />
 
-                  <button
-                    onClick={adminLogin}
-                    disabled={adminLoading}
-                    style={adminLoginButton}
-                  >
-                    {adminLoading ? "Checking..." : "Admin Login"}
+                  <button onClick={adminLogin} disabled={adminLoading} style={adminLoginButton}>
+                    {adminLoading ? "Checking..." : "Login"}
                   </button>
                 </div>
               )}
@@ -691,6 +761,35 @@ export default function CheckInPage() {
               {adminMessage && <p style={adminMessageText}>{adminMessage}</p>}
             </section>
           )}
+
+          <section style={glassCard}>
+            <div style={sectionHeader}>
+              <div>
+                <h2 style={sectionTitle}>Your Player Card</h2>
+                <p style={adminStatusText}>
+                  {profileLoading
+                    ? "Checking profile..."
+                    : playerProfile
+                      ? "This card will be used automatically when you check in."
+                      : profileMessage}
+                </p>
+              </div>
+            </div>
+
+            {playerProfile ? (
+              <PlayerMiniCard profile={playerProfile} />
+            ) : (
+              <div style={profileMissingBox}>
+                <p style={{ margin: 0, fontWeight: 800 }}>
+                  Log in or create a player profile before scanning a ticket.
+                </p>
+                <div style={profileLinksRow}>
+                  <a href="/login" style={profileLinkButton}>Login</a>
+                  <a href="/register" style={profileLinkButton}>Register</a>
+                </div>
+              </div>
+            )}
+          </section>
 
           <section style={glassCard}>
             <button onClick={startScanner} style={startButton}>
@@ -715,10 +814,7 @@ export default function CheckInPage() {
                 />
               </div>
 
-              <button
-                onClick={handleManualTicketSubmit}
-                style={manualTicketButton}
-              >
+              <button onClick={handleManualTicketSubmit} style={manualTicketButton}>
                 Check Ticket Code
               </button>
             </div>
@@ -733,7 +829,7 @@ export default function CheckInPage() {
               </div>
             )}
 
-            {currentTicket && (
+            {currentTicket && playerProfile && (
               <div style={validTicketBox}>
                 <div>
                   <p style={smallGreenText}>Valid Ticket</p>
@@ -742,18 +838,11 @@ export default function CheckInPage() {
                   </p>
                 </div>
 
-                <label style={labelStyle}>
-                  <span style={labelText}>Insert name</span>
-                  <input
-                    value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
-                    placeholder="Player name"
-                    style={inputStyle}
-                  />
-                </label>
+                <PlayerCheckInPreview profile={playerProfile} />
 
                 <div>
-                  <p style={labelText}>Football position</p>
+                  <p style={labelText}>Today&apos;s position</p>
+                  <p style={helperText}>Tap to activate or tap again to remove.</p>
 
                   <div style={positionGrid}>
                     {positions.map((position) => {
@@ -784,35 +873,6 @@ export default function CheckInPage() {
                 >
                   CAPTAIN
                 </button>
-
-                <div>
-                  <div style={ratingHeader}>
-                    <p style={labelText}>Rating</p>
-                    <p style={{ margin: 0, fontWeight: 900 }}>
-                      {selectedRating}/10
-                    </p>
-                  </div>
-
-                  <div style={starsWrap}>
-                    {Array.from({ length: 10 }, (_, index) => {
-                      const value = index + 1;
-
-                      return (
-                        <button
-                          key={value}
-                          onClick={() => setSelectedRating(value)}
-                          style={{
-                            ...starButton,
-                            color: ratingColour(value),
-                            opacity: value <= selectedRating ? 1 : 0.25,
-                          }}
-                        >
-                          ★
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
 
                 <button onClick={handleArrived} style={arrivedButton}>
                   I HAVE ARRIVED
@@ -847,66 +907,13 @@ export default function CheckInPage() {
               <>
                 <div style={{ display: "grid", gap: "10px", marginTop: "12px" }}>
                   {visibleArrivals.map((player) => (
-                    <div key={player.ticket} style={arrivalCard}>
-                      <div style={arrivalTop}>
-                        <div>
-                          <p style={{ margin: 0, fontWeight: 900 }}>
-                            {player.name}{" "}
-                            {player.captain && (
-                              <span style={{ color: "#FACC15" }}>(Captain)</span>
-                            )}
-                          </p>
-                          <p
-                            style={{
-                              margin: "4px 0 0",
-                              color: "#94A3B8",
-                              fontSize: "12px",
-                            }}
-                          >
-                            {player.ticket}
-                          </p>
-                        </div>
-
-                        <p style={ratingPill}>{player.rating}/10</p>
-                      </div>
-
-                      <p
-                        style={{
-                          margin: "10px 0 0",
-                          color: "#CBD5E1",
-                          fontSize: "13px",
-                        }}
-                      >
-                        {player.positions.join(", ") || "No position selected"}
-                      </p>
-
-                      <p
-                        style={{
-                          margin: "6px 0 0",
-                          color: "#64748B",
-                          fontSize: "12px",
-                        }}
-                      >
-                        Arrived: {player.arrivalTime}
-                      </p>
-                      {isAdmin && (
-                        <div style={adminPlayerActions}>
-                          <button
-                            onClick={() => openEditPlayerModal(player)}
-                            style={editPlayerButton}
-                          >
-                            Edit Player
-                          </button>
-
-                          <button
-                            onClick={() => openRemovePlayerConfirm(player)}
-                            style={removePlayerButton}
-                          >
-                            Remove Player
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    <ArrivalCard
+                      key={player.ticket}
+                      player={player}
+                      isAdmin={isAdmin}
+                      onEdit={() => openEditPlayerModal(player)}
+                      onRemove={() => openRemovePlayerConfirm(player)}
+                    />
                   ))}
                 </div>
 
@@ -962,36 +969,24 @@ export default function CheckInPage() {
                           <h3 style={teamName}>{teamStyle.name}</h3>
                         </div>
 
-                        <p style={teamStyle.badge}>Avg {average}/10</p>
+                        <p style={teamStyle.badge}>Avg {average}/99</p>
                       </div>
 
-                      <div
-                        style={{
-                          display: "grid",
-                          gap: "8px",
-                          marginTop: "14px",
-                        }}
-                      >
+                      <div style={{ display: "grid", gap: "8px", marginTop: "14px" }}>
                         {team.players.map((player) => (
                           <div key={player.ticket} style={teamPlayerCard}>
                             <div style={arrivalTop}>
                               <div>
                                 <p style={teamPlayerName}>
-                                  {player.captain && (
-                                    <span title="Captain">👑 </span>
-                                  )}
-                                  {hasGoalkeeper(player) && (
-                                    <span title="Goalkeeper">🧤 </span>
-                                  )}
+                                  {player.captain && <span title="Captain">👑 </span>}
+                                  {hasGoalkeeper(player) && <span title="Goalkeeper">🧤 </span>}
                                   {player.name}
                                 </p>
 
-                                <p style={teamPlayerPositions}>
-                                  {player.positions.join(", ")}
-                                </p>
+                                <p style={teamPlayerPositions}>{player.positions.join(", ")}</p>
                               </div>
 
-                              <p style={teamRatingPill}>{player.rating}/10</p>
+                              <p style={teamRatingPill}>{player.rating}/99</p>
                             </div>
                           </div>
                         ))}
@@ -1021,7 +1016,7 @@ export default function CheckInPage() {
 
             <div style={editModalBody}>
               <label style={labelStyle}>
-                <span style={labelText}>Player name</span>
+                <span style={labelText}>Player nickname</span>
                 <input
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
@@ -1061,38 +1056,20 @@ export default function CheckInPage() {
                 CAPTAIN
               </button>
 
-              <div>
-                <div style={ratingHeader}>
-                  <p style={labelText}>Rating</p>
-                  <p style={{ margin: 0, fontWeight: 900 }}>{editRating}/10</p>
-                </div>
+              <label style={labelStyle}>
+                <span style={labelText}>Profile rating 50–99</span>
+                <input
+                  value={editRating}
+                  onChange={(e) => setEditRating(Number(e.target.value))}
+                  min={50}
+                  max={99}
+                  inputMode="numeric"
+                  style={inputStyle}
+                  type="number"
+                />
+              </label>
 
-                <div style={starsWrap}>
-                  {Array.from({ length: 10 }, (_, index) => {
-                    const value = index + 1;
-
-                    return (
-                      <button
-                        key={value}
-                        onClick={() => setEditRating(value)}
-                        style={{
-                          ...starButton,
-                          color: ratingColour(value),
-                          opacity: value <= editRating ? 1 : 0.25,
-                        }}
-                      >
-                        ★
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <button
-                onClick={submitEditPlayer}
-                disabled={isSavingEdit}
-                style={arrivedButton}
-              >
+              <button onClick={submitEditPlayer} disabled={isSavingEdit} style={arrivedButton}>
                 {isSavingEdit ? "SAVING..." : "SUBMIT CHANGES"}
               </button>
             </div>
@@ -1106,24 +1083,15 @@ export default function CheckInPage() {
             <p style={smallGreenText}>Confirm Remove</p>
             <h2 style={sectionTitle}>Remove {playerToRemove.name}?</h2>
             <p style={confirmText}>
-              This will delete the player from the check-in list. The ticket can
-              then be checked in again if needed.
+              This will delete the player from the check-in list. The ticket can then be checked in again if needed.
             </p>
 
             <div style={confirmActions}>
-              <button
-                onClick={() => setPlayerToRemove(null)}
-                disabled={isRemovingPlayer}
-                style={confirmNoButton}
-              >
+              <button onClick={() => setPlayerToRemove(null)} disabled={isRemovingPlayer} style={confirmNoButton}>
                 No
               </button>
 
-              <button
-                onClick={clearSinglePlayer}
-                disabled={isRemovingPlayer}
-                style={confirmYesButton}
-              >
+              <button onClick={clearSinglePlayer} disabled={isRemovingPlayer} style={confirmYesButton}>
                 {isRemovingPlayer ? "Removing..." : "Yes, Remove"}
               </button>
             </div>
@@ -1136,24 +1104,14 @@ export default function CheckInPage() {
           <div style={modalCard}>
             <p style={smallGreenText}>Confirm Clear</p>
             <h2 style={sectionTitle}>Clear all players?</h2>
-            <p style={confirmText}>
-              This will remove every checked-in player and reset created teams.
-            </p>
+            <p style={confirmText}>This will remove every checked-in player and reset created teams.</p>
 
             <div style={confirmActions}>
-              <button
-                onClick={() => setClearAllConfirmOpen(false)}
-                disabled={isClearingPlayers}
-                style={confirmNoButton}
-              >
+              <button onClick={() => setClearAllConfirmOpen(false)} disabled={isClearingPlayers} style={confirmNoButton}>
                 No
               </button>
 
-              <button
-                onClick={clearArrivals}
-                disabled={isClearingPlayers}
-                style={confirmYesButton}
-              >
+              <button onClick={clearArrivals} disabled={isClearingPlayers} style={confirmYesButton}>
                 {isClearingPlayers ? "Clearing..." : "Yes, Clear All"}
               </button>
             </div>
@@ -1162,6 +1120,149 @@ export default function CheckInPage() {
       )}
     </>
   );
+}
+
+function PlayerMiniCard({ profile }: { profile: PlayerProfile }) {
+  const tier = getRatingTier(profile.rating);
+
+  return (
+    <div style={{ ...profileCardStyle, ...getTierStyle(tier) }}>
+      <div style={profileCardTop}>
+        <div>
+          <p style={profileRatingStyle}>{profile.rating}</p>
+          <p style={profileTierStyle}>{tier}</p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <p style={profileNumberStyle}>#{profile.player_number || "--"}</p>
+          <p style={profilePositionStyle}>{profile.main_position || "Position"}</p>
+        </div>
+      </div>
+
+      <div style={profilePhotoWrap}>
+        {profile.profile_picture_url ? (
+          <img src={profile.profile_picture_url} alt={profile.nickname} style={profilePhoto} />
+        ) : (
+          <div style={profileInitial}>{profile.nickname?.charAt(0)?.toUpperCase() || "P"}</div>
+        )}
+      </div>
+
+      <div style={{ textAlign: "center", marginTop: "14px" }}>
+        <h3 style={profileNameStyle}>{profile.nickname}</h3>
+        <p style={profileMetaStyle}>{profile.preferred_foot || "Right"} foot</p>
+      </div>
+
+      <div style={profileStatsGrid}>
+        <Stat label="GP" value={profile.games_played} />
+        <Stat label="G" value={profile.goals} />
+        <Stat label="A" value={profile.assists} />
+      </div>
+    </div>
+  );
+}
+
+function PlayerCheckInPreview({ profile }: { profile: PlayerProfile }) {
+  return (
+    <div style={checkInPreviewCard}>
+      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        {profile.profile_picture_url ? (
+          <img src={profile.profile_picture_url} alt={profile.nickname} style={checkInPreviewPhoto} />
+        ) : (
+          <div style={checkInPreviewInitial}>{profile.nickname?.charAt(0)?.toUpperCase() || "P"}</div>
+        )}
+        <div style={{ flex: 1 }}>
+          <p style={{ margin: 0, fontWeight: 950, fontSize: "18px" }}>{profile.nickname}</p>
+          <p style={{ margin: "4px 0 0", color: "#CBD5E1", fontSize: "13px" }}>
+            #{profile.player_number || "--"} • {profile.preferred_foot || "Right"} foot • {profile.main_position || "Position"}
+          </p>
+        </div>
+        <p style={ratingPill}>{profile.rating}/99</p>
+      </div>
+    </div>
+  );
+}
+
+function ArrivalCard({
+  player,
+  isAdmin,
+  onEdit,
+  onRemove,
+}: {
+  player: Arrival;
+  isAdmin: boolean;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div style={arrivalCard}>
+      <div style={arrivalTop}>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          {player.profilePictureUrl ? (
+            <img src={player.profilePictureUrl} alt={player.name} style={arrivalPhoto} />
+          ) : (
+            <div style={arrivalInitial}>{player.name?.charAt(0)?.toUpperCase() || "P"}</div>
+          )}
+          <div>
+            <p style={{ margin: 0, fontWeight: 900 }}>
+              {player.name} {player.captain && <span style={{ color: "#FACC15" }}>(Captain)</span>}
+            </p>
+            <p style={{ margin: "4px 0 0", color: "#94A3B8", fontSize: "12px" }}>
+              #{player.playerNumber || "--"} • {player.ticket}
+            </p>
+          </div>
+        </div>
+
+        <p style={ratingPill}>{player.rating}/99</p>
+      </div>
+
+      <p style={{ margin: "10px 0 0", color: "#CBD5E1", fontSize: "13px" }}>
+        {player.positions.join(", ") || "No position selected"}
+      </p>
+
+      <p style={{ margin: "6px 0 0", color: "#64748B", fontSize: "12px" }}>
+        {player.preferredFoot ? `${player.preferredFoot} foot • ` : ""}
+        GP {player.gamesPlayed ?? 0} • G {player.goals ?? 0} • A {player.assists ?? 0}
+      </p>
+
+      <p style={{ margin: "6px 0 0", color: "#64748B", fontSize: "12px" }}>
+        Arrived: {player.arrivalTime}
+      </p>
+
+      {isAdmin && (
+        <div style={adminPlayerActions}>
+          <button onClick={onEdit} style={editPlayerButton}>
+            Edit Player
+          </button>
+
+          <button onClick={onRemove} style={removePlayerButton}>
+            Remove Player
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div style={profileStatBox}>
+      <p style={profileStatLabel}>{label}</p>
+      <p style={profileStatValue}>{value}</p>
+    </div>
+  );
+}
+
+function getRatingTier(rating: number) {
+  if (rating >= 90) return "Platinum";
+  if (rating >= 80) return "Gold";
+  if (rating >= 70) return "Silver";
+  return "Bronze";
+}
+
+function getTierStyle(tier: string) {
+  if (tier === "Platinum") return platinumCardStyle;
+  if (tier === "Gold") return goldCardStyle;
+  if (tier === "Silver") return silverCardStyle;
+  return bronzeCardStyle;
 }
 
 const adminFloatingWrap = {
@@ -1467,6 +1568,12 @@ const labelText = {
   fontWeight: 700,
 };
 
+const helperText = {
+  margin: "4px 0 10px",
+  color: "#94A3B8",
+  fontSize: "12px",
+};
+
 const inputStyle = {
   width: "100%",
   borderRadius: "12px",
@@ -1518,27 +1625,6 @@ const activeCaptainButton = {
   borderColor: "#86EFAC",
 };
 
-const ratingHeader = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-};
-
-const starsWrap = {
-  display: "flex",
-  flexWrap: "wrap" as const,
-  gap: "4px",
-};
-
-const starButton = {
-  border: "none",
-  background: "transparent",
-  fontSize: "28px",
-  cursor: "pointer",
-  padding: "0 1px",
-  filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.4))",
-};
-
 const arrivedButton = {
   width: "100%",
   border: "none",
@@ -1586,7 +1672,6 @@ const clearButton = {
   cursor: "pointer",
 };
 
-
 const arrivalCountText = {
   margin: "5px 0 0",
   color: "#94A3B8",
@@ -1629,10 +1714,11 @@ const ratingPill = {
   padding: "4px 8px",
   fontSize: "12px",
   fontWeight: 900,
+  whiteSpace: "nowrap" as const,
 };
+
 const removePlayerButton = {
   width: "100%",
-  marginTop: "10px",
   borderRadius: "10px",
   border: "1px solid rgba(239, 68, 68, 0.45)",
   background: "rgba(239, 68, 68, 0.08)",
@@ -1669,6 +1755,7 @@ const random3Button = {
   fontWeight: 900,
   cursor: "pointer",
 };
+
 const teamLabel = {
   margin: 0,
   fontSize: "11px",
@@ -1688,8 +1775,7 @@ const teamName = {
 const redTeamCard = {
   borderRadius: "26px",
   border: "1px solid rgba(248, 113, 113, 0.45)",
-  background:
-    "linear-gradient(160deg, rgba(127, 29, 29, 0.95), rgba(2, 6, 23, 0.92) 62%)",
+  background: "linear-gradient(160deg, rgba(127, 29, 29, 0.95), rgba(2, 6, 23, 0.92) 62%)",
   padding: "16px",
   boxShadow: "0 18px 45px rgba(239, 68, 68, 0.18)",
 };
@@ -1697,8 +1783,7 @@ const redTeamCard = {
 const blueTeamCard = {
   borderRadius: "26px",
   border: "1px solid rgba(96, 165, 250, 0.45)",
-  background:
-    "linear-gradient(160deg, rgba(30, 64, 175, 0.95), rgba(2, 6, 23, 0.92) 62%)",
+  background: "linear-gradient(160deg, rgba(30, 64, 175, 0.95), rgba(2, 6, 23, 0.92) 62%)",
   padding: "16px",
   boxShadow: "0 18px 45px rgba(59, 130, 246, 0.18)",
 };
@@ -1706,8 +1791,7 @@ const blueTeamCard = {
 const limeTeamCard = {
   borderRadius: "26px",
   border: "1px solid rgba(190, 242, 100, 0.45)",
-  background:
-    "linear-gradient(160deg, rgba(77, 124, 15, 0.95), rgba(2, 6, 23, 0.92) 62%)",
+  background: "linear-gradient(160deg, rgba(77, 124, 15, 0.95), rgba(2, 6, 23, 0.92) 62%)",
   padding: "16px",
   boxShadow: "0 18px 45px rgba(132, 204, 22, 0.18)",
 };
@@ -1796,25 +1880,219 @@ const teamRatingPill = {
   fontWeight: 950,
   whiteSpace: "nowrap" as const,
 };
-const teamCard = {
-  borderRadius: "24px",
-  border: "1px solid #334155",
-  background: "rgba(2, 6, 23, 0.7)",
-  padding: "16px",
-};
-
-const avgPill = {
-  margin: 0,
-  borderRadius: "999px",
-  background: "rgba(14, 165, 233, 0.15)",
-  color: "#7DD3FC",
-  padding: "4px 10px",
-  fontSize: "12px",
-  fontWeight: 900,
-};
 
 const teamPlayerCard = {
   borderRadius: "14px",
   background: "#0F172A",
   padding: "12px",
+};
+
+const profileMissingBox = {
+  marginTop: "14px",
+  borderRadius: "18px",
+  border: "1px solid rgba(251, 146, 60, 0.4)",
+  background: "rgba(251, 146, 60, 0.08)",
+  padding: "14px",
+  color: "#FED7AA",
+};
+
+const profileLinksRow = {
+  marginTop: "12px",
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: "10px",
+};
+
+const profileLinkButton = {
+  textAlign: "center" as const,
+  borderRadius: "12px",
+  background: "#FB923C",
+  color: "#431407",
+  padding: "11px",
+  fontWeight: 900,
+  textDecoration: "none",
+};
+
+const profileCardStyle = {
+  marginTop: "14px",
+  borderRadius: "30px",
+  padding: "18px",
+  boxShadow: "0 22px 55px rgba(0,0,0,0.45)",
+};
+
+const bronzeCardStyle = {
+  border: "1px solid rgba(251, 146, 60, 0.48)",
+  background: "linear-gradient(160deg, rgba(120, 53, 15, 0.96), rgba(15, 23, 42, 0.95) 62%)",
+  color: "#FFEDD5",
+};
+
+const silverCardStyle = {
+  border: "1px solid rgba(203, 213, 225, 0.55)",
+  background: "linear-gradient(160deg, rgba(100, 116, 139, 0.98), rgba(15, 23, 42, 0.95) 62%)",
+  color: "#F8FAFC",
+};
+
+const goldCardStyle = {
+  border: "1px solid rgba(250, 204, 21, 0.6)",
+  background: "linear-gradient(160deg, rgba(161, 98, 7, 0.98), rgba(15, 23, 42, 0.95) 62%)",
+  color: "#FEF9C3",
+};
+
+const platinumCardStyle = {
+  border: "1px solid rgba(216, 180, 254, 0.65)",
+  background: "linear-gradient(160deg, rgba(109, 40, 217, 0.98), rgba(15, 23, 42, 0.95) 62%)",
+  color: "#FAF5FF",
+};
+
+const profileCardTop = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+};
+
+const profileRatingStyle = {
+  margin: 0,
+  fontSize: "52px",
+  lineHeight: 0.9,
+  fontWeight: 950,
+};
+
+const profileTierStyle = {
+  margin: "6px 0 0",
+  fontSize: "11px",
+  fontWeight: 950,
+  letterSpacing: "0.24em",
+  textTransform: "uppercase" as const,
+};
+
+const profileNumberStyle = {
+  margin: 0,
+  fontWeight: 950,
+  fontSize: "16px",
+};
+
+const profilePositionStyle = {
+  margin: "4px 0 0",
+  fontSize: "11px",
+  fontWeight: 900,
+  letterSpacing: "0.12em",
+  textTransform: "uppercase" as const,
+  opacity: 0.82,
+};
+
+const profilePhotoWrap = {
+  marginTop: "18px",
+  display: "flex",
+  justifyContent: "center",
+};
+
+const profilePhoto = {
+  width: "130px",
+  height: "130px",
+  borderRadius: "999px",
+  objectFit: "cover" as const,
+  border: "4px solid rgba(255,255,255,0.24)",
+};
+
+const profileInitial = {
+  width: "130px",
+  height: "130px",
+  borderRadius: "999px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(0,0,0,0.24)",
+  border: "4px solid rgba(255,255,255,0.18)",
+  fontSize: "52px",
+  fontWeight: 950,
+};
+
+const profileNameStyle = {
+  margin: 0,
+  fontSize: "24px",
+  fontWeight: 950,
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.04em",
+};
+
+const profileMetaStyle = {
+  margin: "5px 0 0",
+  fontSize: "13px",
+  fontWeight: 800,
+  opacity: 0.86,
+};
+
+const profileStatsGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, 1fr)",
+  gap: "8px",
+  marginTop: "16px",
+};
+
+const profileStatBox = {
+  borderRadius: "16px",
+  background: "rgba(0,0,0,0.22)",
+  padding: "10px",
+  textAlign: "center" as const,
+};
+
+const profileStatLabel = {
+  margin: 0,
+  fontSize: "11px",
+  opacity: 0.72,
+  fontWeight: 800,
+};
+
+const profileStatValue = {
+  margin: "4px 0 0",
+  fontSize: "19px",
+  fontWeight: 950,
+};
+
+const checkInPreviewCard = {
+  borderRadius: "16px",
+  border: "1px solid rgba(148, 163, 184, 0.25)",
+  background: "rgba(2, 6, 23, 0.45)",
+  padding: "12px",
+};
+
+const checkInPreviewPhoto = {
+  width: "54px",
+  height: "54px",
+  borderRadius: "999px",
+  objectFit: "cover" as const,
+  border: "2px solid rgba(255,255,255,0.22)",
+};
+
+const checkInPreviewInitial = {
+  width: "54px",
+  height: "54px",
+  borderRadius: "999px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(255,255,255,0.09)",
+  fontSize: "23px",
+  fontWeight: 950,
+};
+
+const arrivalPhoto = {
+  width: "42px",
+  height: "42px",
+  borderRadius: "999px",
+  objectFit: "cover" as const,
+  border: "2px solid rgba(255,255,255,0.2)",
+};
+
+const arrivalInitial = {
+  width: "42px",
+  height: "42px",
+  borderRadius: "999px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(255,255,255,0.09)",
+  fontSize: "18px",
+  fontWeight: 950,
+  flexShrink: 0,
 };
